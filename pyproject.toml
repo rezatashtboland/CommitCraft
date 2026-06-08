@@ -1,0 +1,19 @@
+[project]
+name = "commitcraft"
+version = "1.0.0"
+description = "AI-powered Git commit assistant using a GapGPT-compatible API"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "requests>=2.31.0",
+  "rich>=13.7.0",
+  "python-bidi>=0.4.2",
+  "arabic-reshaper>=3.0.0",
+]
+
+[project.scripts]
+commitcraft = "commitcraft_cli:main"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
