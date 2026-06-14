@@ -42,17 +42,7 @@ class GitService:
     def changed_files(self) -> list[ChangedFile]:
         """Return changed files using porcelain v1 output."""
 
-        result = self._run(["git", "status", "--porcelain"], check=True)
-        files: list[ChangedFile] = []
-        for line in result.stdout.splitlines():
-            if not line:
-                continue
-            status = line[:2].strip() or "?"
-            path = line[3:].strip()
-            if " -> " in path:
-                path = path.split(" -> ", maxsplit=1)[1]
-            files.append(ChangedFile(status=status, path=path))
-        return files
+        return self._status_entries()
 
     def diff_for_files(self, files: list[str]) -> str:
         """Return staged and unstaged diff for selected files."""
@@ -79,7 +69,11 @@ class GitService:
 
         if not files:
             return
-        self._run(["git", "add", "--", *files], check=True)
+        deleted_files, other_files = self._split_deleted_files(files)
+        if other_files:
+            self._run(["git", "add", "--", *other_files], check=True)
+        if deleted_files:
+            self._run(["git", "rm", "--ignore-unmatch", "--", *deleted_files], check=True)
 
     def commit(self, message: str) -> None:
         """Create a Git commit."""
@@ -100,11 +94,10 @@ class GitService:
     def _untracked_file_snapshots(self, files: list[str]) -> str:
         """Return readable snapshots for selected untracked text files."""
 
-        status = self._run(["git", "status", "--short", "--", *files], check=True).stdout
         untracked_paths = [
-            line[3:].strip()
-            for line in status.splitlines()
-            if line.startswith("?? ")
+            file.path
+            for file in self._status_entries(files)
+            if file.status == "??"
         ]
         snapshots: list[str] = []
         for relative_path in untracked_paths:
@@ -118,6 +111,41 @@ class GitService:
                 continue
             snapshots.append(f"### {relative_path}\n{content[:8000]}")
         return "\n\n".join(snapshots)
+
+    def _split_deleted_files(self, files: list[str]) -> tuple[list[str], list[str]]:
+        """Split selected files into deleted paths and paths safe for git add."""
+
+        deleted_paths = {
+            file.path
+            for file in self._status_entries(files)
+            if "D" in file.status
+        }
+        deleted_files = [file for file in files if file in deleted_paths]
+        other_files = [file for file in files if file not in deleted_paths]
+        return deleted_files, other_files
+
+    def _status_entries(self, files: list[str] | None = None) -> list[ChangedFile]:
+        """Return status entries using NUL-delimited porcelain output."""
+
+        command = ["git", "status", "--porcelain=v1", "-z"]
+        if files is not None:
+            command.extend(["--", *files])
+        result = self._run(command, check=True)
+        changed_files: list[ChangedFile] = []
+        entries = result.stdout.rstrip("\0").split("\0")
+        index = 0
+        while index < len(entries):
+            entry = entries[index]
+            index += 1
+            if not entry:
+                continue
+            raw_status = entry[:2]
+            status = raw_status.strip() or "?"
+            path = entry[3:]
+            if "R" in raw_status or "C" in raw_status:
+                index += 1
+            changed_files.append(ChangedFile(status=status, path=path))
+        return changed_files
 
     def _run(
         self,
