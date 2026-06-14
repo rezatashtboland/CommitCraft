@@ -37,6 +37,11 @@ If dependencies are missing, the script also attempts to install them automatica
 python commitcraft_cli.py
 ```
 
+Every run starts by asking for the working-copy folder path. This path is
+mandatory and must point to an existing Git repository. CommitCraft remembers
+the last successfully confirmed path in a standalone path-history file, separate
+from `~/.commitcraft/config.json`, and offers it as the next run's default.
+
 On first run, CommitCraft asks for:
 
 - AI API token
@@ -137,6 +142,11 @@ python -m pip install -r requirements.txt
 ```bash
 python commitcraft_cli.py
 ```
+
+در هر اجرا ابتدا مسیر پوشه کاری پرسیده می‌شود. این مسیر اجباری است و باید به
+یک مخزن Git موجود اشاره کند. کامیت‌کرفت آخرین مسیر تأییدشده را در یک فایل
+تاریخچه مستقل، جدا از `~/.commitcraft/config.json`، نگه می‌دارد و در اجرای
+بعدی به‌عنوان مقدار پیش‌فرض پیشنهاد می‌دهد.
 
 در اجرای اول این موارد پرسیده می‌شود:
 

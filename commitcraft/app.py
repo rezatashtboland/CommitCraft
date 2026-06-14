@@ -72,11 +72,11 @@ SETTINGS_OPTIONS = (
 class CommitCraftApp:
     """Main application controller."""
 
-    def __init__(self) -> None:
+    def __init__(self, repo_path: str) -> None:
         self.config_manager = ConfigManager()
         self.translator = Translator(DEFAULT_LANGUAGE)
         self.ui = TerminalUI(self.translator)
-        self.git = GitService()
+        self.git = GitService(repo_path)
         self.config: AppConfig | None = None
 
     def run(self) -> None:
