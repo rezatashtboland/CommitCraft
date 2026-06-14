@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import importlib.util
-import subprocess
 import sys
 from dataclasses import dataclass
+
+from .subprocess_utils import run_capture
 
 
 @dataclass(frozen=True)
@@ -56,11 +57,6 @@ class DependencyInstaller:
             "install",
             *[dependency.install_spec for dependency in dependencies],
         ]
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        result = run_capture(command)
         output = "\n".join(part for part in (result.stdout, result.stderr) if part)
         return result.returncode == 0, output

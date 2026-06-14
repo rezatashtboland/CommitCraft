@@ -6,7 +6,7 @@ CommitCraft is an AI-powered Python assistant that detects Git changes, asks a G
 
 ### Features
 
-- Colorful terminal UI with `commit`, `push`, and `exit` options.
+- Colorful terminal UI with `commit`, `push`, `settings`, and `exit` options.
 - `commit` is the default active menu option.
 - First-run configuration stored at `~/.commitcraft/config.json`.
 - Separate UI language and AI commit-message language.
@@ -15,6 +15,7 @@ CommitCraft is an AI-powered Python assistant that detects Git changes, asks a G
 - Retry management for unstable AI responses.
 - Cross-platform support for Windows, Linux, and macOS.
 - Automatic dependency check and installation through `pip`.
+- In-app settings editor with masked secrets, validation, reset, and instant apply.
 
 ### Requirements
 
@@ -78,6 +79,19 @@ Example:
 }
 ```
 
+You can also choose `Settings` from the main menu to view and edit every
+configuration value without opening the JSON file manually:
+
+- API token is always masked and never printed in full.
+- API URL, model name, UI language, model output language, retry wait, and retry
+  attempts are individually editable.
+- UI language and model output language remain independent and accept only
+  Persian/`fa` or English/`en`.
+- Numeric values must be positive, and the API URL must be a valid HTTP(S) URL.
+- Changes are saved to `~/.commitcraft/config.json` and applied immediately.
+- `Cancel / back without saving` discards the current edit, `Reset to defaults`
+  restores default values, and `Back to main menu` closes the submenu.
+
 ### Commit Message Format
 
 The AI is instructed to return:
@@ -93,7 +107,7 @@ The AI is instructed to return:
 
 ### امکانات
 
-- رابط ترمینالی رنگی و جذاب با گزینه‌های `commit`، `push` و `exit`
+- رابط ترمینالی رنگی و جذاب با گزینه‌های `commit`، `push`، `settings` و `exit`
 - گزینه پیش‌فرض منو روی `commit`
 - ساخت تنظیمات در اجرای اول و ذخیره در `~/.commitcraft/config.json`
 - استقلال زبان رابط کاربری از زبان خروجی مدل
@@ -102,6 +116,7 @@ The AI is instructed to return:
 - تلاش مجدد هنگام پاسخ نامناسب یا خطای سرور
 - پشتیبانی از Windows، Linux و macOS
 - بررسی و نصب خودکار وابستگی‌ها با `pip`
+- ویرایش تنظیمات داخل برنامه با مخفی‌سازی مقادیر حساس، اعتبارسنجی، بازنشانی و اعمال فوری
 
 ### پیش‌نیازها
 
@@ -164,6 +179,20 @@ python commitcraft_cli.py
   "model": "gpt-4o-mini"
 }
 ```
+
+همچنین می‌توانید از منوی اصلی گزینه `تنظیمات` را انتخاب کنید و همه مقادیر
+پیکربندی را بدون ویرایش دستی فایل JSON ببینید یا تغییر دهید:
+
+- توکن API همیشه مخفی نمایش داده می‌شود و هیچ‌وقت کامل چاپ نمی‌شود.
+- آدرس API، نام مدل، زبان رابط کاربری، زبان خروجی مدل، زمان انتظار و تعداد
+  تلاش مجدد به‌صورت جداگانه قابل ویرایش هستند.
+- زبان رابط کاربری و زبان خروجی مدل مستقل هستند و فقط فارسی/`fa` یا
+  انگلیسی/`en` را می‌پذیرند.
+- مقدارهای عددی باید مثبت باشند و آدرس API باید یک URL معتبر HTTP(S) باشد.
+- تغییرات در `~/.commitcraft/config.json` ذخیره و بلافاصله در همان نشست اعمال می‌شوند.
+- گزینه `لغو / بازگشت بدون ذخیره` ویرایش جاری را لغو می‌کند، گزینه
+  `بازنشانی به پیش‌فرض‌ها` مقادیر پیش‌فرض را برمی‌گرداند و گزینه
+  `بازگشت به منوی اصلی` زیرمنو را می‌بندد.
 
 ### ساختار پیام کامیت
 

@@ -6,8 +6,9 @@ import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
-from .i18n import DEFAULT_LANGUAGE, normalize_language
+from .i18n import DEFAULT_LANGUAGE, SUPPORTED_LANGUAGES, normalize_language
 
 
 CONFIG_DIR = Path.home() / ".commitcraft"
@@ -15,6 +16,7 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 DEFAULT_API_URL = "https://api.gapgpt.app/v1/chat/completions"
 DEFAULT_RETRY_WAIT_SECONDS = 5
 DEFAULT_RETRY_ATTEMPTS = 10
+DEFAULT_MODEL = "gpt-4o-mini"
 
 
 @dataclass
@@ -27,7 +29,7 @@ class AppConfig:
     model_output_language: str = DEFAULT_LANGUAGE
     retry_wait_seconds: int = DEFAULT_RETRY_WAIT_SECONDS
     retry_attempts: int = DEFAULT_RETRY_ATTEMPTS
-    model: str = "gpt-4o-mini"
+    model: str = DEFAULT_MODEL
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AppConfig":
@@ -48,7 +50,7 @@ class AppConfig:
                 data.get("retry_attempts"),
                 DEFAULT_RETRY_ATTEMPTS,
             ),
-            model=str(data.get("model") or "gpt-4o-mini").strip(),
+            model=str(data.get("model") or DEFAULT_MODEL).strip(),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -81,6 +83,77 @@ class ConfigManager:
         self.config_file.parent.mkdir(parents=True, exist_ok=True)
         with self.config_file.open("w", encoding="utf-8") as file:
             json.dump(config.to_dict(), file, ensure_ascii=False, indent=2)
+
+
+def default_config() -> AppConfig:
+    """Return a config object populated with safe application defaults."""
+
+    return AppConfig(api_token="")
+
+
+def mask_secret(value: str, visible_chars: int = 4) -> str:
+    """Mask sensitive values so secrets are never printed in full."""
+
+    if not value:
+        return ""
+    if len(value) <= visible_chars:
+        return "•" * len(value)
+    return f"{'•' * 8}{value[-visible_chars:]}"
+
+
+def validate_api_token(value: str) -> str:
+    """Validate and normalize an API token."""
+
+    normalized = value.strip()
+    if not normalized:
+        raise ValueError("value_required")
+    return normalized
+
+
+def validate_api_url(value: str) -> str:
+    """Validate and normalize an HTTP(S) API URL."""
+
+    normalized = value.strip()
+    parsed = urlparse(normalized)
+    if (
+        not normalized
+        or any(character.isspace() for character in normalized)
+        or parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or parsed.hostname is None
+    ):
+        raise ValueError("invalid_url")
+    return normalized
+
+
+def validate_language(value: str) -> str:
+    """Validate a supported language code or name."""
+
+    normalized = normalize_language(value, default="")
+    if normalized not in SUPPORTED_LANGUAGES:
+        raise ValueError("invalid_language")
+    return normalized
+
+
+def validate_positive_int(value: str) -> int:
+    """Validate a positive integer setting."""
+
+    try:
+        integer = int(value.strip())
+    except (AttributeError, ValueError) as exc:
+        raise ValueError("invalid_positive_number") from exc
+    if integer <= 0:
+        raise ValueError("invalid_positive_number")
+    return integer
+
+
+def validate_model(value: str) -> str:
+    """Validate and normalize a model name."""
+
+    normalized = value.strip()
+    if not normalized:
+        raise ValueError("value_required")
+    return normalized
 
 
 def _positive_int(value: Any, default: int) -> int:

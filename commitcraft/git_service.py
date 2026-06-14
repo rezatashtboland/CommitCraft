@@ -6,6 +6,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from .subprocess_utils import run_capture
+
 
 class GitError(RuntimeError):
     """Raised when a Git command fails."""
@@ -124,13 +126,7 @@ class GitService:
     ) -> subprocess.CompletedProcess[str]:
         """Run a Git command and raise a friendly error on failure."""
 
-        result = subprocess.run(
-            command,
-            cwd=self.repo_path,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        result = run_capture(command, cwd=self.repo_path)
         if check and result.returncode != 0:
             message = result.stderr.strip() or result.stdout.strip() or "Git command failed."
             raise GitError(message)

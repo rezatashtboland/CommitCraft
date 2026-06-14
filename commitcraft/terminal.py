@@ -75,11 +75,12 @@ class TerminalUI:
         table.add_column("label", style="bold white")
         table.add_row("1", self.t("menu_commit"))
         table.add_row("2", self.t("menu_push"))
+        table.add_row("3", self.t("menu_settings"))
         table.add_row("0", self.t("menu_exit"))
         self.console.print(Panel(table, border_style="green"))
         return Prompt.ask(
             f"[bold cyan]{self.t('menu_prompt')}[/bold cyan]",
-            choices=["", "1", "2", "0"],
+            choices=["", "1", "2", "3", "0"],
             default="1",
             show_choices=False,
         )
@@ -124,6 +125,29 @@ class TerminalUI:
         for key, value in rows:
             table.add_row(self.display(key), self.display(value))
         self.console.print(table)
+
+    def settings_menu(self, rows: Iterable[tuple[str, str, str]]) -> str:
+        """Render the persistent settings submenu and return selected option."""
+
+        table = Table(
+            title=self.t("settings_title"),
+            border_style="bright_blue",
+            show_lines=True,
+        )
+        table.add_column("#", style="bold yellow", justify="center")
+        table.add_column(self.t("settings_column"), style="bold cyan")
+        table.add_column(self.t("settings_value_column"), style="white")
+        for key, label, value in rows:
+            table.add_row(key, self.display(label), self.display(value))
+        table.add_row("r", self.t("settings_reset"), "")
+        table.add_row("c", self.t("settings_cancel"), "")
+        table.add_row("0", self.t("settings_back"), "")
+        self.console.print(Panel(table, border_style="green"))
+        return Prompt.ask(
+            f"[bold cyan]{self.t('settings_prompt')}[/bold cyan]",
+            choices=["1", "2", "3", "4", "5", "6", "7", "r", "c", "0"],
+            show_choices=False,
+        )
 
     def panel(self, title: str, body: str, style: str = "cyan") -> None:
         """Render a titled panel."""

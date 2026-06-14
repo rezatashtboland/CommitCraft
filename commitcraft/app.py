@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import replace
+
 from rich.table import Table
 
 from .ai_client import AIClientError, GapGPTClient
@@ -11,11 +14,59 @@ from .config import (
     DEFAULT_RETRY_WAIT_SECONDS,
     AppConfig,
     ConfigManager,
+    default_config,
+    mask_secret,
+    validate_api_token,
+    validate_api_url,
+    validate_language,
+    validate_model,
+    validate_positive_int,
 )
 from .dependencies import DependencyInstaller
 from .git_service import ChangedFile, GitError, GitService
-from .i18n import DEFAULT_LANGUAGE, Translator, normalize_language
+from .i18n import DEFAULT_LANGUAGE, Translator
 from .terminal import TerminalUI
+
+
+SettingValidator = Callable[[str], object]
+
+
+class SettingsOption:
+    """Metadata for one editable setting in the interactive settings menu."""
+
+    def __init__(
+        self,
+        key: str,
+        label_key: str,
+        field_name: str,
+        validator: SettingValidator,
+        *,
+        password: bool = False,
+        suffix: str = "",
+    ) -> None:
+        self.key = key
+        self.label_key = label_key
+        self.field_name = field_name
+        self.validator = validator
+        self.password = password
+        self.suffix = suffix
+
+
+SETTINGS_OPTIONS = (
+    SettingsOption("1", "api_token", "api_token", validate_api_token, password=True),
+    SettingsOption("2", "api_url", "api_url", validate_api_url),
+    SettingsOption("3", "model_name", "model", validate_model),
+    SettingsOption("4", "ui_language", "ui_language", validate_language, suffix=" [fa/en]"),
+    SettingsOption(
+        "5",
+        "model_language",
+        "model_output_language",
+        validate_language,
+        suffix=" [fa/en]",
+    ),
+    SettingsOption("6", "retry_wait", "retry_wait_seconds", validate_positive_int),
+    SettingsOption("7", "retry_attempts", "retry_attempts", validate_positive_int),
+)
 
 
 class CommitCraftApp:
@@ -39,6 +90,9 @@ class CommitCraftApp:
                     self._handle_commit()
                 elif choice == "2":
                     self._handle_push()
+                elif choice == "3":
+                    self._handle_settings()
+                    continue
                 elif choice == "0":
                     break
                 else:
@@ -95,29 +149,34 @@ class CommitCraftApp:
     def _create_config(self) -> AppConfig:
         """Ask user for first-run config values."""
 
-        api_token = self.ui.ask(self.ui.translator.text("api_token"), password=True)
-        api_url = self.ui.ask(
+        api_token = self._ask_validated(
+            self.ui.translator.text("api_token"),
+            validate_api_token,
+            password=True,
+        )
+        api_url = self._ask_validated(
             f"{self.ui.translator.text('api_url')} ({self.ui.translator.text('leave_default')})",
+            validate_api_url,
             default=DEFAULT_API_URL,
         )
-        ui_language = normalize_language(
-            self.ui.ask(
-                f"{self.ui.translator.text('ui_language')} [fa/en]",
-                default=DEFAULT_LANGUAGE,
-            )
+        ui_language = self._ask_validated(
+            f"{self.ui.translator.text('ui_language')} [fa/en]",
+            validate_language,
+            default=DEFAULT_LANGUAGE,
         )
-        model_language = normalize_language(
-            self.ui.ask(
-                f"{self.ui.translator.text('model_language')} [fa/en]",
-                default=DEFAULT_LANGUAGE,
-            )
+        model_language = self._ask_validated(
+            f"{self.ui.translator.text('model_language')} [fa/en]",
+            validate_language,
+            default=DEFAULT_LANGUAGE,
         )
-        retry_wait = self.ui.ask(
+        retry_wait = self._ask_validated(
             self.ui.translator.text("retry_wait"),
+            validate_positive_int,
             default=str(DEFAULT_RETRY_WAIT_SECONDS),
         )
-        retry_attempts = self.ui.ask(
+        retry_attempts = self._ask_validated(
             self.ui.translator.text("retry_attempts"),
+            validate_positive_int,
             default=str(DEFAULT_RETRY_ATTEMPTS),
         )
         return AppConfig.from_dict(
@@ -131,6 +190,23 @@ class CommitCraftApp:
             }
         )
 
+    def _ask_validated(
+        self,
+        prompt: str,
+        validator: SettingValidator,
+        *,
+        default: str | None = None,
+        password: bool = False,
+    ) -> object:
+        """Ask for input until it passes the supplied validator."""
+
+        while True:
+            raw_value = self.ui.ask(prompt, default=default, password=password)
+            try:
+                return validator(raw_value)
+            except ValueError as exc:
+                self.ui.error(self.ui.translator.text(str(exc)))
+
     def _apply_config_language(self) -> None:
         """Apply configured UI language."""
 
@@ -138,6 +214,87 @@ class CommitCraftApp:
             return
         self.translator = Translator(self.config.ui_language)
         self.ui.set_language(self.translator)
+
+    def _handle_settings(self) -> None:
+        """Show a persistent settings submenu until the user goes back."""
+
+        if self.config is None:
+            return
+
+        options = {option.key: option for option in SETTINGS_OPTIONS}
+        while True:
+            choice = self.ui.settings_menu(self._settings_rows())
+            if choice == "0":
+                return
+            if choice == "c":
+                self.ui.info(self.ui.translator.text("settings_cancel_done"))
+                continue
+            if choice == "r":
+                self._reset_settings()
+                continue
+            option = options.get(choice)
+            if option is None:
+                self.ui.warning(self.ui.translator.text("invalid_choice"))
+                continue
+            self._edit_setting(option)
+
+    def _settings_rows(self) -> list[tuple[str, str, str]]:
+        """Build display rows for current settings without exposing secrets."""
+
+        if self.config is None:
+            return []
+
+        rows: list[tuple[str, str, str]] = []
+        for option in SETTINGS_OPTIONS:
+            value = getattr(self.config, option.field_name)
+            if option.field_name == "api_token":
+                value = mask_secret(str(value))
+                if value:
+                    value = f"{value} ({self.ui.translator.text('sensitive_masked')})"
+            rows.append((option.key, self.ui.translator.text(option.label_key), str(value)))
+        return rows
+
+    def _edit_setting(self, option: SettingsOption) -> None:
+        """Prompt until a valid value is entered or the edit is cancelled."""
+
+        if self.config is None:
+            return
+
+        current_value = getattr(self.config, option.field_name)
+        default = None if option.password else str(current_value)
+        prompt = (
+            f"{self.ui.translator.text('settings_enter_new')}: "
+            f"{self.ui.translator.text(option.label_key)}{option.suffix} "
+            f"({self.ui.translator.text('settings_cancel_hint')})"
+        )
+        while True:
+            raw_value = self.ui.ask(prompt, default=default, password=option.password)
+            if raw_value.strip().lower() == "c":
+                self.ui.info(self.ui.translator.text("settings_cancel_done"))
+                return
+            try:
+                new_value = option.validator(raw_value)
+            except ValueError as exc:
+                self.ui.error(self.ui.translator.text(str(exc)))
+                continue
+            self._save_config(replace(self.config, **{option.field_name: new_value}))
+            self.ui.success(self.ui.translator.text("settings_update_done"))
+            return
+
+    def _reset_settings(self) -> None:
+        """Reset settings to application defaults after confirmation."""
+
+        if not self.ui.confirm(self.ui.translator.text("settings_reset_confirm"), default=False):
+            return
+        self._save_config(default_config())
+        self.ui.success(self.ui.translator.text("settings_reset_done"))
+
+    def _save_config(self, config: AppConfig) -> None:
+        """Persist config and apply session-visible values immediately."""
+
+        self.config = config
+        self.config_manager.save(config)
+        self._apply_config_language()
 
     def _handle_commit(self) -> None:
         """Select changed files, generate message, and commit."""
