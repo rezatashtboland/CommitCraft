@@ -8,7 +8,7 @@ from typing import Iterable
 from rich.align import Align
 from rich.console import Console
 from rich.panel import Panel
-from rich.prompt import Confirm, Prompt
+from rich.prompt import Prompt
 from rich.table import Table
 from rich.text import Text
 
@@ -36,6 +36,20 @@ class TerminalUI:
         """Change UI language at runtime."""
 
         self.translator = translator
+
+    def refresh_persian_support(self) -> None:
+        """Load Persian display helpers after an on-demand installation."""
+
+        global arabic_reshaper, get_display
+        if arabic_reshaper is not None and get_display is not None:
+            return
+        try:
+            import arabic_reshaper as reshaper
+            from bidi.algorithm import get_display as bidi_get_display
+        except ImportError:
+            return
+        arabic_reshaper = reshaper
+        get_display = bidi_get_display
 
     def display(self, value: object) -> str:
         """Prepare plain text for terminal display."""
@@ -80,9 +94,7 @@ class TerminalUI:
         self.console.print(Panel(table, border_style="green"))
         return Prompt.ask(
             f"[bold cyan]{self.t('menu_prompt')}[/bold cyan]",
-            choices=["", "1", "2", "3", "0"],
             default="1",
-            show_choices=False,
         )
 
     def info(self, message: str) -> None:
@@ -114,14 +126,24 @@ class TerminalUI:
     def confirm(self, label: str, default: bool = True) -> bool:
         """Prompt for confirmation."""
 
-        return Confirm.ask(self.display(label), default=default)
+        yes = self.translator.text("yes")
+        no = self.translator.text("no")
+        default_choice = yes if default else no
+        while True:
+            answer = Prompt.ask(self.display(label), default=default_choice)
+            normalized = answer.strip().lower()
+            if normalized == yes.lower():
+                return True
+            if normalized == no.lower():
+                return False
+            self.warning(self.translator.text("invalid_choice"))
 
     def table(self, title: str, rows: Iterable[tuple[str, str]]) -> None:
         """Render a simple two-column table."""
 
         table = Table(title=self.display(title), border_style="blue")
         table.add_column("#", style="bold yellow", justify="right")
-        table.add_column("Value", style="white")
+        table.add_column(self.t("settings_value_column"), style="white")
         for key, value in rows:
             table.add_row(self.display(key), self.display(value))
         self.console.print(table)
@@ -139,14 +161,12 @@ class TerminalUI:
         table.add_column(self.t("settings_value_column"), style="white")
         for key, label, value in rows:
             table.add_row(key, self.display(label), self.display(value))
-        table.add_row("r", self.t("settings_reset"), "")
-        table.add_row("c", self.t("settings_cancel"), "")
+        table.add_row("8", self.t("settings_reset"), "")
+        table.add_row("9", self.t("settings_cancel"), "")
         table.add_row("0", self.t("settings_back"), "")
         self.console.print(Panel(table, border_style="green"))
         return Prompt.ask(
             f"[bold cyan]{self.t('settings_prompt')}[/bold cyan]",
-            choices=["1", "2", "3", "4", "5", "6", "7", "r", "c", "0"],
-            show_choices=False,
         )
 
     def panel(self, title: str, body: str, style: str = "cyan") -> None:

@@ -7,6 +7,10 @@ requires-python = ">=3.10"
 dependencies = [
   "requests>=2.31.0",
   "rich>=13.7.0",
+]
+
+[project.optional-dependencies]
+persian = [
   "python-bidi>=0.4.2",
   "arabic-reshaper>=3.0.0",
 ]

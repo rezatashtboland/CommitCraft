@@ -69,7 +69,7 @@ class GapGPTClient:
                 message = self._sanitize_commit_message(content)
                 if message:
                     return AIResponse(message=message, raw=content)
-                raise AIClientError("AI response did not include a commit message.")
+                raise AIClientError("ai_empty_message")
             except (requests.RequestException, ValueError, KeyError, AIClientError) as exc:
                 last_error = exc
                 if attempt < self.config.retry_attempts:
@@ -77,7 +77,9 @@ class GapGPTClient:
                         on_retry(attempt, self.config.retry_attempts, exc)
                     time.sleep(self.config.retry_wait_seconds)
 
-        raise AIClientError(str(last_error) if last_error else "AI request failed.")
+        if isinstance(last_error, AIClientError):
+            raise AIClientError(str(last_error)) from last_error
+        raise AIClientError("ai_request_failed") from last_error
 
     def _build_prompt(self, diff: str) -> str:
         """Create model prompt while keeping output language configurable."""
@@ -105,11 +107,11 @@ Git changes:
 
         choices = data["choices"]
         if not choices:
-            raise AIClientError("AI response choices are empty.")
+            raise AIClientError("ai_empty_choices")
         message = choices[0].get("message", {})
         content = message.get("content")
         if not isinstance(content, str):
-            raise AIClientError("AI response content is missing.")
+            raise AIClientError("ai_missing_content")
         return content.strip()
 
     def _sanitize_commit_message(self, content: str) -> str:

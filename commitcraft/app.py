@@ -22,7 +22,7 @@ from .config import (
     validate_model,
     validate_positive_int,
 )
-from .dependencies import DependencyInstaller
+from .dependencies import DependencyInstaller, PERSIAN_DEPENDENCIES
 from .git_service import ChangedFile, GitError, GitService
 from .i18n import DEFAULT_LANGUAGE, Translator
 from .terminal import TerminalUI
@@ -42,27 +42,33 @@ class SettingsOption:
         validator: SettingValidator,
         *,
         password: bool = False,
-        suffix: str = "",
+        hint_key: str | None = None,
     ) -> None:
         self.key = key
         self.label_key = label_key
         self.field_name = field_name
         self.validator = validator
         self.password = password
-        self.suffix = suffix
+        self.hint_key = hint_key
 
 
 SETTINGS_OPTIONS = (
     SettingsOption("1", "api_token", "api_token", validate_api_token, password=True),
     SettingsOption("2", "api_url", "api_url", validate_api_url),
     SettingsOption("3", "model_name", "model", validate_model),
-    SettingsOption("4", "ui_language", "ui_language", validate_language, suffix=" [fa/en]"),
+    SettingsOption(
+        "4",
+        "ui_language",
+        "ui_language",
+        validate_language,
+        hint_key="language_options_hint",
+    ),
     SettingsOption(
         "5",
         "model_language",
         "model_output_language",
         validate_language,
-        suffix=" [fa/en]",
+        hint_key="language_options_hint",
     ),
     SettingsOption("6", "retry_wait", "retry_wait_seconds", validate_positive_int),
     SettingsOption("7", "retry_attempts", "retry_attempts", validate_positive_int),
@@ -132,7 +138,7 @@ class CommitCraftApp:
             f"{self.ui.translator.text('dependency_installing')}: "
             f"{', '.join(dependency.install_spec for dependency in missing)}"
         )
-        ok, output = installer.install(missing)
+        ok, _output = installer.install(missing)
         if ok:
             return
 
@@ -143,8 +149,6 @@ class CommitCraftApp:
                 f"{self.ui.translator.text('dependency_manual')}: "
                 f"{dependency.package} >= {dependency.version} | {command}"
             )
-        if output:
-            self.ui.panel("pip", output, style="red")
 
     def _create_config(self) -> AppConfig:
         """Ask user for first-run config values."""
@@ -160,12 +164,14 @@ class CommitCraftApp:
             default=DEFAULT_API_URL,
         )
         ui_language = self._ask_validated(
-            f"{self.ui.translator.text('ui_language')} [fa/en]",
+            self._prompt_with_hint("ui_language", "language_options_hint"),
             validate_language,
             default=DEFAULT_LANGUAGE,
         )
+        ui_language = self._ensure_language_available(str(ui_language))
+        self.ui.set_language(Translator(str(ui_language)))
         model_language = self._ask_validated(
-            f"{self.ui.translator.text('model_language')} [fa/en]",
+            self._prompt_with_hint("model_language", "language_options_hint"),
             validate_language,
             default=DEFAULT_LANGUAGE,
         )
@@ -207,6 +213,11 @@ class CommitCraftApp:
             except ValueError as exc:
                 self.ui.error(self.ui.translator.text(str(exc)))
 
+    def _prompt_with_hint(self, label_key: str, hint_key: str) -> str:
+        """Build a localized prompt with a localized hint."""
+
+        return f"{self.ui.translator.text(label_key)} ({self.ui.translator.text(hint_key)})"
+
     def _apply_config_language(self) -> None:
         """Apply configured UI language."""
 
@@ -226,10 +237,10 @@ class CommitCraftApp:
             choice = self.ui.settings_menu(self._settings_rows())
             if choice == "0":
                 return
-            if choice == "c":
+            if choice == "9":
                 self.ui.info(self.ui.translator.text("settings_cancel_done"))
                 continue
-            if choice == "r":
+            if choice == "8":
                 self._reset_settings()
                 continue
             option = options.get(choice)
@@ -237,6 +248,32 @@ class CommitCraftApp:
                 self.ui.warning(self.ui.translator.text("invalid_choice"))
                 continue
             self._edit_setting(option)
+
+    def _ensure_language_available(self, language: str) -> str:
+        """Install optional language support and return a safe language choice."""
+
+        if language != "fa":
+            return language
+
+        self.ui.info(self.ui.translator.text("persian_dependency_check"))
+        installer = DependencyInstaller()
+        missing = installer.missing(PERSIAN_DEPENDENCIES)
+        if not missing:
+            self.ui.success(self.ui.translator.text("persian_dependency_ready"))
+            return language
+
+        self.ui.info(
+            f"{self.ui.translator.text('persian_dependency_installing')}: "
+            f"{', '.join(dependency.install_spec for dependency in missing)}"
+        )
+        ok, _output = installer.install(missing)
+        if ok:
+            self.ui.refresh_persian_support()
+            self.ui.success(self.ui.translator.text("persian_dependency_ready"))
+            return language
+
+        self.ui.error(self.ui.translator.text("persian_dependency_failed"))
+        return "en"
 
     def _settings_rows(self) -> list[tuple[str, str, str]]:
         """Build display rows for current settings without exposing secrets."""
@@ -264,12 +301,13 @@ class CommitCraftApp:
         default = None if option.password else str(current_value)
         prompt = (
             f"{self.ui.translator.text('settings_enter_new')}: "
-            f"{self.ui.translator.text(option.label_key)}{option.suffix} "
+            f"{self.ui.translator.text(option.label_key)}"
+            f"{self._localized_option_hint(option)} "
             f"({self.ui.translator.text('settings_cancel_hint')})"
         )
         while True:
             raw_value = self.ui.ask(prompt, default=default, password=option.password)
-            if raw_value.strip().lower() == "c":
+            if raw_value.strip() == "0":
                 self.ui.info(self.ui.translator.text("settings_cancel_done"))
                 return
             try:
@@ -277,9 +315,18 @@ class CommitCraftApp:
             except ValueError as exc:
                 self.ui.error(self.ui.translator.text(str(exc)))
                 continue
+            if option.field_name == "ui_language":
+                new_value = self._ensure_language_available(str(new_value))
             self._save_config(replace(self.config, **{option.field_name: new_value}))
             self.ui.success(self.ui.translator.text("settings_update_done"))
             return
+
+    def _localized_option_hint(self, option: SettingsOption) -> str:
+        """Return a localized setting hint, including its surrounding spacing."""
+
+        if option.hint_key is None:
+            return ""
+        return f" ({self.ui.translator.text(option.hint_key)})"
 
     def _reset_settings(self) -> None:
         """Reset settings to application defaults after confirmation."""
@@ -347,13 +394,13 @@ class CommitCraftApp:
             border_style="bright_blue",
         )
         table.add_column("#", style="bold yellow", justify="right")
-        table.add_column("Status", style="cyan")
-        table.add_column("Path", style="white")
+        table.add_column(self.ui.t("status_column"), style="cyan")
+        table.add_column(self.ui.t("path_column"), style="white")
         for index, file in enumerate(changed_files, start=1):
             table.add_row(str(index), file.status, self.ui.display(file.path))
         self.ui.console.print(table)
         self.ui.info(self.ui.translator.text("selection_help"))
-        raw = self.ui.ask("Remove / حذف", default="")
+        raw = self.ui.ask(self.ui.translator.text("remove_files_prompt"), default="")
         removed_indexes = self._parse_indexes(raw, len(changed_files))
         return [
             file.path
@@ -397,13 +444,26 @@ class CommitCraftApp:
             return
         self.ui.warning(
             f"{self.ui.translator.text('ai_retry')} "
-            f"{attempt}/{total} ({self.config.retry_wait_seconds}s): {exc}"
+            f"{attempt}/{total} "
+            f"({self.config.retry_wait_seconds} {self.ui.translator.text('seconds_short')})"
         )
 
     def _friendly_error(self, exc: Exception) -> str:
         """Translate known error keys."""
 
         message = str(exc)
-        if message in {"git_missing", "git_not_repo"}:
+        if message in {
+            "git_missing",
+            "git_not_repo",
+            "git_command_failed",
+            "ai_empty_message",
+            "ai_empty_choices",
+            "ai_missing_content",
+            "ai_request_failed",
+        }:
             return self.ui.translator.text(message)
+        if isinstance(exc, GitError):
+            return self.ui.translator.text("git_command_failed")
+        if isinstance(exc, AIClientError):
+            return self.ui.translator.text("ai_request_failed")
         return message

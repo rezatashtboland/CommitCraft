@@ -10,8 +10,8 @@ CommitCraft is an AI-powered Python assistant that detects Git changes, asks a G
 - `commit` is the default active menu option.
 - First-run configuration stored at `~/.commitcraft/config.json`.
 - Separate UI language and AI commit-message language.
-- Persian and English support, with Persian as the default.
-- Persian RTL shaping through `arabic-reshaper` and `python-bidi`.
+- Persian and English support, with English as the first-run default.
+- Persian RTL shaping installed on demand through `arabic-reshaper` and `python-bidi`.
 - Retry management for unstable AI responses.
 - Cross-platform support for Windows, Linux, and macOS.
 - Automatic dependency check and installation through `pip`.
@@ -29,7 +29,7 @@ CommitCraft is an AI-powered Python assistant that detects Git changes, asks a G
 python -m pip install -r requirements.txt
 ```
 
-If dependencies are missing, the script also attempts to install them automatically on startup. If that fails, it prints each package name, minimum version, and manual install command.
+If core dependencies are missing, the script also attempts to install them automatically on startup. Persian display dependencies are installed only when Persian is selected.
 
 ### Run
 
@@ -76,8 +76,8 @@ Example:
 {
   "api_token": "YOUR_TOKEN",
   "api_url": "https://api.gapgpt.app/v1/chat/completions",
-  "ui_language": "fa",
-  "model_output_language": "fa",
+  "ui_language": "en",
+  "model_output_language": "en",
   "retry_wait_seconds": 5,
   "retry_attempts": 10,
   "model": "gpt-4o-mini"
@@ -92,9 +92,10 @@ configuration value without opening the JSON file manually:
   attempts are individually editable.
 - UI language and model output language remain independent and accept only
   Persian/`fa` or English/`en`.
+- Selecting Persian installs Persian display support if it is not already available.
 - Numeric values must be positive, and the API URL must be a valid HTTP(S) URL.
 - Changes are saved to `~/.commitcraft/config.json` and applied immediately.
-- `Cancel / back without saving` discards the current edit, `Reset to defaults`
+- `Cancel without saving` discards the current edit, `Reset to defaults`
   restores default values, and `Back to main menu` closes the submenu.
 
 ### Commit Message Format
@@ -116,8 +117,8 @@ The AI is instructed to return:
 - گزینه پیش‌فرض منو روی `commit`
 - ساخت تنظیمات در اجرای اول و ذخیره در `~/.commitcraft/config.json`
 - استقلال زبان رابط کاربری از زبان خروجی مدل
-- پشتیبانی از فارسی و انگلیسی، با فارسی به‌عنوان پیش‌فرض
-- پشتیبانی از نمایش راست‌به‌چپ فارسی با `arabic-reshaper` و `python-bidi`
+- پشتیبانی از فارسی و انگلیسی، با انگلیسی به‌عنوان پیش‌فرض اجرای اول
+- نصب پشتیبانی نمایش راست‌به‌چپ فارسی فقط هنگام انتخاب فارسی
 - تلاش مجدد هنگام پاسخ نامناسب یا خطای سرور
 - پشتیبانی از Windows، Linux و macOS
 - بررسی و نصب خودکار وابستگی‌ها با `pip`
@@ -135,7 +136,7 @@ The AI is instructed to return:
 python -m pip install -r requirements.txt
 ```
 
-اگر وابستگی‌ها نصب نباشند، برنامه هنگام اجرا تلاش می‌کند آن‌ها را خودکار نصب کند. اگر نصب خودکار ناموفق باشد، نام پکیج، نسخه موردنیاز و دستور نصب دستی نمایش داده می‌شود.
+اگر وابستگی‌های اصلی نصب نباشند، برنامه هنگام اجرا تلاش می‌کند آن‌ها را خودکار نصب کند. وابستگی‌های نمایش فارسی فقط هنگام انتخاب فارسی نصب می‌شوند.
 
 ### اجرا
 
@@ -182,8 +183,8 @@ python commitcraft_cli.py
 {
   "api_token": "YOUR_TOKEN",
   "api_url": "https://api.gapgpt.app/v1/chat/completions",
-  "ui_language": "fa",
-  "model_output_language": "fa",
+  "ui_language": "en",
+  "model_output_language": "en",
   "retry_wait_seconds": 5,
   "retry_attempts": 10,
   "model": "gpt-4o-mini"
@@ -198,9 +199,10 @@ python commitcraft_cli.py
   تلاش مجدد به‌صورت جداگانه قابل ویرایش هستند.
 - زبان رابط کاربری و زبان خروجی مدل مستقل هستند و فقط فارسی/`fa` یا
   انگلیسی/`en` را می‌پذیرند.
+- انتخاب فارسی در صورت نیاز پشتیبانی نمایش فارسی را نصب می‌کند.
 - مقدارهای عددی باید مثبت باشند و آدرس API باید یک URL معتبر HTTP(S) باشد.
 - تغییرات در `~/.commitcraft/config.json` ذخیره و بلافاصله در همان نشست اعمال می‌شوند.
-- گزینه `لغو / بازگشت بدون ذخیره` ویرایش جاری را لغو می‌کند، گزینه
+- گزینه `لغو بدون ذخیره` ویرایش جاری را لغو می‌کند، گزینه
   `بازنشانی به پیش‌فرض‌ها` مقادیر پیش‌فرض را برمی‌گرداند و گزینه
   `بازگشت به منوی اصلی` زیرمنو را می‌بندد.
 

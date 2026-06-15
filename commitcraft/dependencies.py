@@ -24,9 +24,12 @@ class Dependency:
         return f"{self.package}>={self.version}"
 
 
-REQUIRED_DEPENDENCIES = (
+CORE_DEPENDENCIES = (
     Dependency("requests", "requests", "2.31.0"),
     Dependency("rich", "rich", "13.7.0"),
+)
+
+PERSIAN_DEPENDENCIES = (
     Dependency("python-bidi", "bidi", "0.4.2"),
     Dependency("arabic-reshaper", "arabic_reshaper", "3.0.0"),
 )
@@ -35,12 +38,12 @@ REQUIRED_DEPENDENCIES = (
 class DependencyInstaller:
     """Check and install missing runtime dependencies."""
 
-    def missing(self) -> list[Dependency]:
+    def missing(self, dependencies: tuple[Dependency, ...] = CORE_DEPENDENCIES) -> list[Dependency]:
         """Return dependencies that cannot be imported."""
 
         return [
             dependency
-            for dependency in REQUIRED_DEPENDENCIES
+            for dependency in dependencies
             if importlib.util.find_spec(dependency.import_name) is None
         ]
 
