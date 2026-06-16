@@ -123,6 +123,19 @@ class TerminalUI:
         prompt = self.display(label)
         return Prompt.ask(prompt, default=default, password=password)
 
+    def ask_multiline(self, label: str, default: str) -> str:
+        """Prompt for a possibly multi-line value terminated by an empty line."""
+
+        self.info(label)
+        self.console.print(self.display(default))
+        lines: list[str] = []
+        while True:
+            line = input()
+            if line == "":
+                break
+            lines.append(line)
+        return "\n".join(lines) if lines else default
+
     def confirm(self, label: str, default: bool = True) -> bool:
         """Prompt for confirmation."""
 
@@ -161,8 +174,8 @@ class TerminalUI:
         table.add_column(self.t("settings_value_column"), style="white")
         for key, label, value in rows:
             table.add_row(key, self.display(label), self.display(value))
-        table.add_row("8", self.t("settings_reset"), "")
-        table.add_row("9", self.t("settings_cancel"), "")
+        table.add_row("9", self.t("settings_reset"), "")
+        table.add_row("10", self.t("settings_cancel"), "")
         table.add_row("0", self.t("settings_back"), "")
         self.console.print(Panel(table, border_style="green"))
         return Prompt.ask(

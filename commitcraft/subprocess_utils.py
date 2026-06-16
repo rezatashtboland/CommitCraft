@@ -6,12 +6,18 @@ import locale
 import subprocess
 
 
-def run_capture(command: list[str], *, cwd: str | None = None) -> subprocess.CompletedProcess[str]:
+def run_capture(
+    command: list[str],
+    *,
+    cwd: str | None = None,
+    input: str | None = None,
+) -> subprocess.CompletedProcess[str]:
     """Run a command and decode captured bytes without reader-thread failures."""
 
     result = subprocess.run(
         command,
         cwd=cwd,
+        input=input.encode("utf-8") if input is not None else None,
         capture_output=True,
         check=False,
     )

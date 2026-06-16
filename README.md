@@ -10,6 +10,7 @@ CommitCraft is an AI-powered Python assistant that detects Git changes, asks a G
 - `commit` is the default active menu option.
 - First-run configuration stored at `~/.commitcraft/config.json`.
 - Separate UI language and AI commit-message language.
+- Conventional Commits mode with AI-inferred type, scope, and breaking-change footer support.
 - Persian and English support, with English as the first-run default.
 - Persian RTL shaping installed on demand through `arabic-reshaper` and `python-bidi`.
 - Retry management for unstable AI responses.
@@ -50,6 +51,7 @@ On first run, CommitCraft asks for:
 - AI output language for commit messages: `fa` or `en`
 - Retry wait time, default `5`
 - Retry attempts, default `10`
+- Conventional Commits mode, default `true`
 
 ### Workflow
 
@@ -57,8 +59,9 @@ On first run, CommitCraft asks for:
 2. Review uncommitted files.
 3. All files are selected by default.
 4. Enter file numbers to remove unwanted files, separated by commas.
-5. Confirm the AI-generated commit message.
-6. CommitCraft stages selected files and creates the commit.
+5. Optionally split unrelated files into separate commits.
+6. Review and edit the AI-generated commit message.
+7. CommitCraft validates Conventional Commits when enabled, stages selected files, and creates the commit.
 
 The menu remains active after every commit or push. Exit only happens through the `Exit` option or `Ctrl+C`.
 
@@ -80,7 +83,8 @@ Example:
   "model_output_language": "en",
   "retry_wait_seconds": 5,
   "retry_attempts": 10,
-  "model": "gpt-4o-mini"
+  "model": "gpt-4o-mini",
+  "conventional_commits": true
 }
 ```
 
@@ -88,8 +92,8 @@ You can also choose `Settings` from the main menu to view and edit every
 configuration value without opening the JSON file manually:
 
 - API token is always masked and never printed in full.
-- API URL, model name, UI language, model output language, retry wait, and retry
-  attempts are individually editable.
+- API URL, model name, UI language, model output language, retry wait, retry
+  attempts, and Conventional Commits mode are individually editable.
 - UI language and model output language remain independent and accept only
   Persian/`fa` or English/`en`.
 - Selecting Persian installs Persian display support if it is not already available.
@@ -102,8 +106,10 @@ configuration value without opening the JSON file manually:
 
 The AI is instructed to return:
 
-- First line in Conventional Commit style, such as `feat: add AI commit assistant`
-- Optional body with 1-3 short bullet points when useful
+- First line in Conventional Commit style, such as `feat(cli): add AI commit assistant`
+- Standard types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, and `revert`
+- Optional body and footer separated by a blank line
+- Breaking changes using `!` plus a `BREAKING CHANGE:` footer
 - No explanations outside the commit message
 - No Markdown code fences
 
@@ -187,7 +193,8 @@ python commitcraft_cli.py
   "model_output_language": "en",
   "retry_wait_seconds": 5,
   "retry_attempts": 10,
-  "model": "gpt-4o-mini"
+  "model": "gpt-4o-mini",
+  "conventional_commits": true
 }
 ```
 
@@ -195,8 +202,8 @@ python commitcraft_cli.py
 پیکربندی را بدون ویرایش دستی فایل JSON ببینید یا تغییر دهید:
 
 - توکن API همیشه مخفی نمایش داده می‌شود و هیچ‌وقت کامل چاپ نمی‌شود.
-- آدرس API، نام مدل، زبان رابط کاربری، زبان خروجی مدل، زمان انتظار و تعداد
-  تلاش مجدد به‌صورت جداگانه قابل ویرایش هستند.
+- آدرس API، نام مدل، زبان رابط کاربری، زبان خروجی مدل، زمان انتظار، تعداد
+  تلاش مجدد و حالت کامیت استاندارد به‌صورت جداگانه قابل ویرایش هستند.
 - زبان رابط کاربری و زبان خروجی مدل مستقل هستند و فقط فارسی/`fa` یا
   انگلیسی/`en` را می‌پذیرند.
 - انتخاب فارسی در صورت نیاز پشتیبانی نمایش فارسی را نصب می‌کند.
@@ -210,7 +217,9 @@ python commitcraft_cli.py
 
 مدل هوش مصنوعی باید این ساختار را رعایت کند:
 
-- خط اول با قالب Conventional Commit، مثل `feat: add AI commit assistant`
-- بدنه اختیاری با ۱ تا ۳ bullet کوتاه فقط در صورت نیاز
+- خط اول با قالب Conventional Commit، مثل `feat(cli): add AI commit assistant`
+- نوع‌های استاندارد: `feat`، `fix`، `docs`، `style`، `refactor`، `perf`، `test`، `build`، `ci`، `chore` و `revert`
+- بدنه و پاورقی اختیاری با یک خط خالی از عنوان جدا می‌شوند
+- تغییرات ناسازگار با `!` و پاورقی `BREAKING CHANGE:` مشخص می‌شوند
 - بدون توضیح اضافه بیرون از پیام کامیت
 - بدون Markdown code fence

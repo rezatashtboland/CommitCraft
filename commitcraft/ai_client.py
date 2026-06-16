@@ -33,17 +33,21 @@ class GapGPTClient:
     def generate_commit_message(
         self,
         diff: str,
+        conventional: bool = True,
         on_retry: Callable[[int, int, Exception], None] | None = None,
     ) -> AIResponse:
         """Generate a commit message from Git diff with retry logic."""
 
-        prompt = self._build_prompt(diff)
+        prompt = self._build_prompt(diff, conventional)
         payload = {
             "model": self.config.model,
             "messages": [
                 {
                     "role": "system",
-                    "content": "You are an expert software engineer who writes concise, accurate Git commit messages.",
+                    "content": (
+                        "You are an expert software engineer who writes concise, "
+                        "accurate Git commit messages."
+                    ),
                 },
                 {"role": "user", "content": prompt},
             ],
@@ -81,22 +85,42 @@ class GapGPTClient:
             raise AIClientError(str(last_error)) from last_error
         raise AIClientError("ai_request_failed") from last_error
 
-    def _build_prompt(self, diff: str) -> str:
+    def _build_prompt(self, diff: str, conventional: bool) -> str:
         """Create model prompt while keeping output language configurable."""
 
         language = "Persian" if self.config.model_output_language == "fa" else "English"
+        if not conventional:
+            return f"""
+Analyze the following Git changes and write exactly one concise free-form commit message.
+
+Output language: {language}
+
+Rules:
+- No Markdown code fences.
+- No explanations outside the commit message.
+- Keep the first line under 72 characters when possible.
+- Use an optional body only when it clarifies important details.
+
+Git changes:
+{diff[:30000]}
+""".strip()
         return f"""
 Analyze the following Git changes and write exactly one commit message.
 
 Output language: {language}
 
 Commit message structure:
-- First line: Conventional Commit style summary, e.g. "feat: add AI commit assistant".
-- Optional body: 1-3 short bullet points only when useful.
+- First line: type(scope): description, type: description, type(scope)!: description,
+  or type!: description.
+- Allowed types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert.
+- Infer the most accurate type and a short lowercase scope from the staged diff.
+- Use an imperative, present-tense description with no final period.
+- Keep the first line under 72 characters.
+- Add a blank line before any body or footer.
+- Optional body: 1-3 short lines only when useful.
+- For breaking changes, add ! in the header and include a BREAKING CHANGE: footer.
 - No Markdown code fences.
 - No explanations outside the commit message.
-- Keep the first line under 72 characters when possible.
-- Use one of these types when appropriate: feat, fix, docs, style, refactor, test, chore, perf, ci, build.
 
 Git changes:
 {diff[:30000]}

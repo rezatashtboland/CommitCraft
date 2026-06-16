@@ -17,6 +17,7 @@ DEFAULT_API_URL = "https://api.gapgpt.app/v1/chat/completions"
 DEFAULT_RETRY_WAIT_SECONDS = 5
 DEFAULT_RETRY_ATTEMPTS = 10
 DEFAULT_MODEL = "gpt-4o-mini"
+DEFAULT_CONVENTIONAL_COMMITS = True
 
 
 @dataclass
@@ -30,6 +31,7 @@ class AppConfig:
     retry_wait_seconds: int = DEFAULT_RETRY_WAIT_SECONDS
     retry_attempts: int = DEFAULT_RETRY_ATTEMPTS
     model: str = DEFAULT_MODEL
+    conventional_commits: bool = DEFAULT_CONVENTIONAL_COMMITS
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AppConfig":
@@ -51,6 +53,10 @@ class AppConfig:
                 DEFAULT_RETRY_ATTEMPTS,
             ),
             model=str(data.get("model") or DEFAULT_MODEL).strip(),
+            conventional_commits=_bool(
+                data.get("conventional_commits"),
+                DEFAULT_CONVENTIONAL_COMMITS,
+            ),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -156,6 +162,17 @@ def validate_model(value: str) -> str:
     return normalized
 
 
+def validate_bool(value: str) -> bool:
+    """Validate a localized yes/no-like setting value and return a boolean."""
+
+    normalized = value.strip().lower()
+    if normalized in {"yes", "y", "true", "1", "on", "بله", "آری", "روشن"}:
+        return True
+    if normalized in {"no", "n", "false", "0", "off", "خیر", "نه", "خاموش"}:
+        return False
+    raise ValueError("invalid_bool")
+
+
 def _positive_int(value: Any, default: int) -> int:
     """Convert a value to a positive integer or return default."""
 
@@ -164,3 +181,16 @@ def _positive_int(value: Any, default: int) -> int:
     except (TypeError, ValueError):
         return default
     return integer if integer > 0 else default
+
+
+def _bool(value: Any, default: bool) -> bool:
+    """Convert persisted JSON values to booleans while preserving defaults."""
+
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        try:
+            return validate_bool(value)
+        except ValueError:
+            return default
+    return default

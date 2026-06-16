@@ -64,6 +64,22 @@ class GitService:
                 diff_parts.append(f"## {title}\n{body}")
         return "\n\n".join(diff_parts)
 
+    def staged_diff_for_files(self, files: list[str]) -> str:
+        """Return only the staged diff and status for selected files."""
+
+        if not files:
+            return ""
+        diff_parts = []
+        staged = self._run(["git", "diff", "--cached", "--", *files], check=True).stdout
+        name_status = self._run(
+            ["git", "diff", "--cached", "--name-status", "--", *files],
+            check=True,
+        ).stdout
+        for title, body in (("STAGED STATUS", name_status), ("STAGED DIFF", staged)):
+            if body.strip():
+                diff_parts.append(f"## {title}\n{body}")
+        return "\n\n".join(diff_parts)
+
     def add(self, files: list[str]) -> None:
         """Stage selected files."""
 
@@ -75,10 +91,19 @@ class GitService:
         if deleted_files:
             self._run(["git", "rm", "--ignore-unmatch", "--", *deleted_files], check=True)
 
-    def commit(self, message: str) -> None:
-        """Create a Git commit."""
+    def reset_paths(self, files: list[str]) -> None:
+        """Remove selected paths from the index without changing the working tree."""
 
-        self._run(["git", "commit", "-m", message], check=True)
+        if files:
+            self._run(["git", "reset", "--", *files], check=True)
+
+    def commit(self, message: str, files: list[str] | None = None) -> None:
+        """Create a Git commit, optionally limited to explicit paths."""
+
+        command = ["git", "commit", "-F", "-"]
+        if files:
+            command.extend(["--only", "--", *files])
+        self._run(command, input_text=message, check=True)
 
     def push(self) -> None:
         """Push current branch to its configured upstream."""
@@ -151,10 +176,11 @@ class GitService:
         self,
         command: list[str],
         check: bool = True,
+        input_text: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
         """Run a Git command and raise a friendly error on failure."""
 
-        result = run_capture(command, cwd=self.repo_path)
+        result = run_capture(command, cwd=self.repo_path, input=input_text)
         if check and result.returncode != 0:
             message = result.stderr.strip() or result.stdout.strip() or "Git command failed."
             raise GitError(message)

@@ -10,6 +10,7 @@ from rich.table import Table
 from .ai_client import AIClientError, GapGPTClient
 from .config import (
     DEFAULT_API_URL,
+    DEFAULT_CONVENTIONAL_COMMITS,
     DEFAULT_RETRY_ATTEMPTS,
     DEFAULT_RETRY_WAIT_SECONDS,
     AppConfig,
@@ -18,10 +19,12 @@ from .config import (
     mask_secret,
     validate_api_token,
     validate_api_url,
+    validate_bool,
     validate_language,
     validate_model,
     validate_positive_int,
 )
+from .conventional import normalize_commit_message, validate_conventional_commit
 from .dependencies import Dependency, DependencyInstaller, PERSIAN_DEPENDENCIES
 from .git_service import ChangedFile, GitError, GitService
 from .i18n import DEFAULT_LANGUAGE, Translator
@@ -72,6 +75,13 @@ SETTINGS_OPTIONS = (
     ),
     SettingsOption("6", "retry_wait", "retry_wait_seconds", validate_positive_int),
     SettingsOption("7", "retry_attempts", "retry_attempts", validate_positive_int),
+    SettingsOption(
+        "8",
+        "conventional_commits",
+        "conventional_commits",
+        validate_bool,
+        hint_key="bool_options_hint",
+    ),
 )
 
 
@@ -185,6 +195,11 @@ class CommitCraftApp:
             validate_positive_int,
             default=str(DEFAULT_RETRY_ATTEMPTS),
         )
+        conventional_commits = self._ask_validated(
+            self._prompt_with_hint("conventional_commits", "bool_options_hint"),
+            validate_bool,
+            default=self.ui.translator.text("yes" if DEFAULT_CONVENTIONAL_COMMITS else "no"),
+        )
         return AppConfig.from_dict(
             {
                 "api_token": api_token,
@@ -193,6 +208,7 @@ class CommitCraftApp:
                 "model_output_language": model_language,
                 "retry_wait_seconds": retry_wait,
                 "retry_attempts": retry_attempts,
+                "conventional_commits": conventional_commits,
             }
         )
 
@@ -240,10 +256,10 @@ class CommitCraftApp:
             choice = self.ui.settings_menu(self._settings_rows())
             if choice == "0":
                 return
-            if choice == "9":
+            if choice == "10":
                 self.ui.info(self.ui.translator.text("settings_cancel_done"))
                 continue
-            if choice == "8":
+            if choice == "9":
                 self._reset_settings()
                 continue
             option = options.get(choice)
@@ -307,6 +323,8 @@ class CommitCraftApp:
                 value = mask_secret(str(value))
                 if value:
                     value = f"{value} ({self.ui.translator.text('sensitive_masked')})"
+            elif isinstance(value, bool):
+                value = self.ui.translator.text("yes" if value else "no")
             rows.append((option.key, self.ui.translator.text(option.label_key), str(value)))
         return rows
 
@@ -379,31 +397,100 @@ class CommitCraftApp:
             if not selected:
                 self.ui.warning(self.ui.translator.text("nothing_selected"))
                 return
+            for commit_files in self._commit_file_groups(selected):
+                self._commit_selected_files(commit_files)
+        except (GitError, AIClientError) as exc:
+            self.ui.error(self._friendly_error(exc))
 
-            diff = self.git.diff_for_files(selected)
+    def _commit_selected_files(self, selected: list[str]) -> None:
+        """Generate, review, and commit one selected file group."""
+
+        if self.config is None:
+            return
+        self.git.add(selected)
+        try:
+            diff = self.git.staged_diff_for_files(selected)
             if not diff.strip():
                 diff = "\n".join(selected)
 
             self.ui.info(self.ui.translator.text("generating"))
             ai_response = GapGPTClient(self.config).generate_commit_message(
                 diff,
+                conventional=self.config.conventional_commits,
                 on_retry=self._show_ai_retry,
             )
-            self.ui.panel(
-                self.ui.translator.text("commit_message"),
-                ai_response.message,
-                style="bright_green",
+            message = self._review_commit_message(ai_response.message)
+        except AIClientError:
+            raise
+        if message is None:
+            return
+
+        self.ui.info(self.ui.translator.text("committing"))
+        self.git.add(selected)
+        self.git.commit(message, selected)
+        self.ui.success(self.ui.translator.text("commit_done"))
+
+    def _review_commit_message(self, generated_message: str) -> str | None:
+        """Let the user inspect, edit, validate, and approve a commit message."""
+
+        if self.config is None:
+            return None
+        message = normalize_commit_message(generated_message)
+        while True:
+            self.ui.panel(self.ui.translator.text("commit_message"), message, style="bright_green")
+            edited = self.ui.ask_multiline(
+                self.ui.translator.text("edit_commit_message"),
+                default=message,
             )
+            if edited.strip():
+                message = normalize_commit_message(edited)
+            if self.config.conventional_commits:
+                validation = validate_conventional_commit(message)
+                if not validation.is_valid:
+                    self.ui.error(self.ui.translator.text("commit_message_invalid"))
+                    self.ui.panel(
+                        self.ui.translator.text("commit_message_validation_errors"),
+                        "\n".join(self.ui.translator.text(error) for error in validation.errors),
+                        style="red",
+                    )
+                    if self.ui.confirm(
+                        self.ui.translator.text("commit_message_edit_again"),
+                        default=True,
+                    ):
+                        continue
+                    return None
+            if self.ui.confirm(self.ui.translator.text("confirm_commit"), default=True):
+                return message
+            return None
 
-            if not self.ui.confirm(self.ui.translator.text("confirm_commit"), default=True):
-                return
+    def _commit_file_groups(self, selected: list[str]) -> list[list[str]]:
+        """Optionally split selected paths into independent commit groups."""
 
-            self.ui.info(self.ui.translator.text("committing"))
-            self.git.add(selected)
-            self.git.commit(ai_response.message)
-            self.ui.success(self.ui.translator.text("commit_done"))
-        except (GitError, AIClientError) as exc:
-            self.ui.error(self._friendly_error(exc))
+        if len(selected) <= 1 or not self.ui.confirm(
+            self.ui.translator.text("split_changes_prompt"),
+            default=False,
+        ):
+            return [selected]
+
+        remaining = selected[:]
+        groups: list[list[str]] = []
+        while remaining:
+            self.ui.table(
+                self.ui.translator.text("split_remaining_files"),
+                [(str(index), path) for index, path in enumerate(remaining, start=1)],
+            )
+            self.ui.info(self.ui.translator.text("split_group_help"))
+            raw = self.ui.ask(self.ui.translator.text("split_group_prompt"), default="")
+            indexes = self._parse_indexes(raw, len(remaining)) if raw.strip() else set(
+                range(1, len(remaining) + 1)
+            )
+            group = [path for index, path in enumerate(remaining, start=1) if index in indexes]
+            if not group:
+                self.ui.warning(self.ui.translator.text("nothing_selected"))
+                continue
+            groups.append(group)
+            remaining = [path for path in remaining if path not in group]
+        return groups
 
     def _select_files(self, changed_files: list[ChangedFile]) -> list[str]:
         """Show changed files and remove user-specified items from default selection."""
