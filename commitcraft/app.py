@@ -8,6 +8,7 @@ from dataclasses import replace
 from rich.table import Table
 
 from .ai_client import AIClientError, GapGPTClient
+from .changelog import ChangelogGenerator
 from .config import (
     DEFAULT_API_URL,
     DEFAULT_CONVENTIONAL_COMMITS,
@@ -29,6 +30,7 @@ from .conventional import normalize_commit_message, validate_conventional_commit
 from .dependencies import Dependency, DependencyInstaller, PERSIAN_DEPENDENCIES
 from .git_service import ChangedFile, GitAuthError, GitConflictError, GitError, GitService
 from .i18n import DEFAULT_LANGUAGE, Translator
+from . import __version__
 from .terminal import TerminalUI
 
 
@@ -128,6 +130,8 @@ class CommitCraftApp:
                 elif choice == "5":
                     self._handle_sync()
                 elif choice == "6":
+                    self._handle_changelog()
+                elif choice == "7":
                     self._handle_settings()
                     continue
                 elif choice == "0":
@@ -609,6 +613,23 @@ class CommitCraftApp:
         if self.config is None:
             return
         self._handle_integration_operation("sync")
+
+    def _handle_changelog(self) -> None:
+        """Generate or continue CHANGELOG.md from new Git commits."""
+
+        try:
+            self.ui.info(self.ui.translator.text("changelog_generating"))
+            result = ChangelogGenerator(self.git, __version__).update()
+            if result.added_count == 0:
+                self.ui.warning(self.ui.translator.text("changelog_no_new_commits"))
+                return
+            self.ui.success(
+                f"{self.ui.translator.text('changelog_done')}: "
+                f"{result.added_count} "
+                f"{self.ui.translator.text('changelog_entries')} | {result.path}"
+            )
+        except (OSError, GitError) as exc:
+            self.ui.error(self._friendly_error(exc))
 
     def _handle_integration_operation(self, operation: str) -> None:
         """Run a pull-like operation with localized reporting and conflict guidance."""

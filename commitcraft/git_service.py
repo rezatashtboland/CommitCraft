@@ -49,6 +49,15 @@ class GitOperationResult:
         return "\n".join(part for part in (self.stdout.strip(), self.stderr.strip()) if part)
 
 
+@dataclass(frozen=True)
+class GitCommit:
+    """A single Git commit summary used by non-mutating repository features."""
+
+    full_hash: str
+    short_hash: str
+    subject: str
+
+
 class GitService:
     """Service responsible for all Git interactions."""
 
@@ -66,6 +75,12 @@ class GitService:
         result = self._run(["git", "rev-parse", "--is-inside-work-tree"], check=False)
         if result.returncode != 0 or result.stdout.strip() != "true":
             raise GitError("git_not_repo")
+
+    def repository_path(self) -> Path:
+        """Return the absolute root path of the selected Git working tree."""
+
+        result = self._run(["git", "rev-parse", "--show-toplevel"], check=True)
+        return Path(result.stdout.strip()).resolve()
 
     def changed_files(self) -> list[ChangedFile]:
         """Return changed files using porcelain v1 output."""
@@ -208,6 +223,31 @@ class GitService:
 
         result = self._run(["git", "branch", "--show-current"], check=True)
         return result.stdout.strip() or "HEAD"
+
+    def commits_after(self, full_hash: str | None) -> list[GitCommit]:
+        """Return commits after the provided hash in oldest-to-newest order."""
+
+        revision_range = f"{full_hash}..HEAD" if full_hash else "HEAD"
+        result = self._run(
+            ["git", "log", "--reverse", "--format=%H%x1f%h%x1f%s%x1e", revision_range],
+            check=True,
+        )
+        commits: list[GitCommit] = []
+        for entry in result.stdout.strip("\x1e\n").split("\x1e"):
+            if not entry.strip():
+                continue
+            parts = entry.strip("\n").split("\x1f", maxsplit=2)
+            if len(parts) != 3:
+                continue
+            full_hash, short_hash, subject = parts
+            commits.append(
+                GitCommit(
+                    full_hash=full_hash.strip(),
+                    short_hash=short_hash.strip(),
+                    subject=subject.strip(),
+                )
+            )
+        return commits
 
     def has_uncommitted_changes(self) -> bool:
         """Return whether the working tree or index has uncommitted changes."""

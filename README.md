@@ -5,13 +5,14 @@ uncommitted changes, lets you choose what to commit, asks a GapGPT-compatible
 chat-completions API for a commit message, and runs Git operations from a
 colorful terminal menu.
 
-Current version: **1.1.0**
+Current version: **1.2.0**
 
 ## English
 
 ### Features
 
-- Interactive terminal menu with commit, push, fetch, pull, sync, settings, and exit actions.
+- Interactive terminal menu with commit, push, fetch, pull, sync, changelog,
+  settings, and exit actions.
 - Mandatory working-copy path prompt before startup, with validation against a real Git repository.
 - Persistent repository path history stored separately from the main settings file.
 - First-run configuration wizard stored at `~/.commitcraft/config.json`.
@@ -24,6 +25,7 @@ Current version: **1.1.0**
 - Git fetch, pull, and sync retries for transient network failures.
 - Pull strategy setting for merge or rebase.
 - Optional auto-stash during pull and sync, including untracked files.
+- Incremental `CHANGELOG.md` generator based on Git commit history.
 - In-app settings editor with masked API token, validation, reset, and immediate apply.
 - Safe Git staging for deleted files by using `git rm --ignore-unmatch`.
 - Captured subprocess output decoded safely to avoid crashes on malformed text.
@@ -104,7 +106,8 @@ The interactive menu accepts these options:
 | `3` | Fetch from remote |
 | `4` | Pull from remote |
 | `5` | Sync with remote |
-| `6` | Settings |
+| `6` | Generate changelog |
+| `7` | Settings |
 | `0` | Exit |
 
 The default menu choice is `1`.
@@ -139,6 +142,30 @@ errors and merge/rebase/stash conflicts are reported without retrying.
 When auto-stash is enabled and local changes exist, pull and sync create a
 `CommitCraft auto-stash` with `--include-untracked` and restore it after the
 integration operation if the repository is not left in a merge or rebase state.
+
+### Changelog Generator
+
+Choose `Generate changelog` from the main menu to create or continue
+`CHANGELOG.md` in the selected repository root.
+
+The changelog generator:
+
+- Creates `CHANGELOG.md` with a Keep a Changelog-style introduction when missing.
+- Uses SemVer version headings with the current app version and current date.
+- Reads commits after the last CommitCraft-generated changelog marker.
+- Adds only commits that are not already represented in the changelog.
+- Groups entries into standard categories such as Added, Changed, Fixed,
+  Documentation, Tests, Build, and Chore.
+- Keeps hidden commit markers in the file so later runs continue incrementally.
+
+Example generated section:
+
+```markdown
+## [1.2.0] - 2026-06-16
+
+### Added
+- Add changelog generator (`abc1234`)
+```
 
 ### Settings
 
@@ -253,11 +280,12 @@ Commit with this message? [yes]: yes
 کنید، از یک API سازگار با GapGPT برای پیام کامیت کمک می‌گیرد و عملیات Git را
 از یک منوی ترمینالی رنگی اجرا می‌کند.
 
-نسخه فعلی: **1.1.0**
+نسخه فعلی: **1.2.0**
 
 ### امکانات
 
-- منوی تعاملی ترمینال با عملیات commit، push، fetch، pull، sync، settings و exit.
+- منوی تعاملی ترمینال با عملیات commit، push، fetch، pull، sync، changelog،
+  settings و exit.
 - دریافت اجباری مسیر پوشه کاری پیش از شروع و اعتبارسنجی آن به‌عنوان مخزن Git.
 - ذخیره تاریخچه مسیر پوشه کاری جدا از فایل تنظیمات اصلی.
 - ساخت تنظیمات اجرای اول در `~/.commitcraft/config.json`.
@@ -270,6 +298,7 @@ Commit with this message? [yes]: yes
 - تلاش مجدد برای fetch، pull و sync فقط در خطاهای موقت شبکه.
 - تنظیم روش pull بین merge و rebase.
 - auto-stash اختیاری هنگام pull و sync، همراه با فایل‌های untracked.
+- تولید افزایشی `CHANGELOG.md` بر اساس تاریخچه commit.
 - ویرایش تنظیمات داخل برنامه با مخفی‌سازی توکن، اعتبارسنجی، بازنشانی و اعمال فوری.
 - stage کردن امن فایل‌های حذف‌شده با `git rm --ignore-unmatch`.
 
@@ -326,7 +355,8 @@ commitcraft
 | `3` | fetch از remote |
 | `4` | pull از remote |
 | `5` | sync با remote |
-| `6` | تنظیمات |
+| `6` | تولید changelog |
+| `7` | تنظیمات |
 | `0` | خروج |
 
 گزینه پیش‌فرض منو `1` است.
@@ -349,6 +379,30 @@ commitcraft
 - fetch پس از تأیید `git fetch --prune` را اجرا می‌کند.
 - pull بسته به تنظیمات با merge یا rebase اجرا می‌شود.
 - sync ابتدا pull تنظیم‌شده را اجرا می‌کند و پس از موفقیت، `git push` می‌زند.
+
+### تولید Changelog
+
+با گزینه تولید changelog در منوی اصلی، فایل `CHANGELOG.md` در ریشه مخزن
+انتخاب‌شده ساخته یا ادامه داده می‌شود.
+
+این قابلیت:
+
+- اگر فایل وجود نداشته باشد، قالب اولیه سازگار با Keep a Changelog می‌سازد.
+- برای نسخه فعلی برنامه heading نسخه SemVer همراه با تاریخ روز می‌نویسد.
+- commitهای بعد از آخرین marker تولیدشده توسط CommitCraft را می‌خواند.
+- فقط commitهایی را اضافه می‌کند که قبلاً در changelog ثبت نشده‌اند.
+- ورودی‌ها را در دسته‌هایی مثل Added، Changed، Fixed، Documentation، Tests،
+  Build و Chore گروه‌بندی می‌کند.
+- markerهای مخفی commit را نگه می‌دارد تا اجرای بعدی افزایشی ادامه پیدا کند.
+
+نمونه خروجی:
+
+```markdown
+## [1.2.0] - 2026-06-16
+
+### Added
+- Add changelog generator (`abc1234`)
+```
 
 ### تنظیمات
 

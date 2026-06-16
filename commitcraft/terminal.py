@@ -92,7 +92,8 @@ class TerminalUI:
         table.add_row("3", self.t("menu_fetch"))
         table.add_row("4", self.t("menu_pull"))
         table.add_row("5", self.t("menu_sync"))
-        table.add_row("6", self.t("menu_settings"))
+        table.add_row("6", self.t("menu_changelog"))
+        table.add_row("7", self.t("menu_settings"))
         table.add_row("0", self.t("menu_exit"))
         self.console.print(Panel(table, border_style="green"))
         return Prompt.ask(
