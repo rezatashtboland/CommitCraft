@@ -22,7 +22,7 @@ from .config import (
     validate_model,
     validate_positive_int,
 )
-from .dependencies import DependencyInstaller, PERSIAN_DEPENDENCIES
+from .dependencies import Dependency, DependencyInstaller, PERSIAN_DEPENDENCIES
 from .git_service import ChangedFile, GitError, GitService
 from .i18n import DEFAULT_LANGUAGE, Translator
 from .terminal import TerminalUI
@@ -223,7 +223,10 @@ class CommitCraftApp:
 
         if self.config is None:
             return
-        self.translator = Translator(self.config.ui_language)
+        language = self.config.ui_language
+        if language == "fa" and self._missing_persian_dependencies():
+            language = DEFAULT_LANGUAGE
+        self.translator = Translator(language)
         self.ui.set_language(self.translator)
 
     def _handle_settings(self) -> None:
@@ -255,9 +258,10 @@ class CommitCraftApp:
         if language != "fa":
             return language
 
+        self._set_session_language("fa")
         self.ui.info(self.ui.translator.text("persian_dependency_check"))
         installer = DependencyInstaller()
-        missing = installer.missing(PERSIAN_DEPENDENCIES)
+        missing = self._missing_persian_dependencies(installer)
         if not missing:
             self.ui.success(self.ui.translator.text("persian_dependency_ready"))
             return language
@@ -273,7 +277,22 @@ class CommitCraftApp:
             return language
 
         self.ui.error(self.ui.translator.text("persian_dependency_failed"))
+        self._set_session_language(DEFAULT_LANGUAGE)
         return "en"
+
+    def _set_session_language(self, language: str) -> None:
+        """Apply a UI language for the current session without persisting config."""
+
+        self.translator = Translator(language)
+        self.ui.set_language(self.translator)
+
+    def _missing_persian_dependencies(
+        self,
+        installer: DependencyInstaller | None = None,
+    ) -> list[Dependency]:
+        """Return missing Persian-only display dependencies without installing them."""
+
+        return (installer or DependencyInstaller()).missing(PERSIAN_DEPENDENCIES)
 
     def _settings_rows(self) -> list[tuple[str, str, str]]:
         """Build display rows for current settings without exposing secrets."""
