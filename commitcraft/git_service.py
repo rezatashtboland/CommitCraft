@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import subprocess
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -13,12 +15,38 @@ class GitError(RuntimeError):
     """Raised when a Git command fails."""
 
 
+class GitConflictError(GitError):
+    """Raised when Git reports a merge, rebase, or stash conflict."""
+
+
+class GitAuthError(GitError):
+    """Raised when Git reports authentication or authorization failure."""
+
+
+class GitTransientError(GitError):
+    """Raised when Git reports a retryable transport failure."""
+
+
 @dataclass(frozen=True)
 class ChangedFile:
     """A changed file reported by Git porcelain status."""
 
     status: str
     path: str
+
+
+@dataclass(frozen=True)
+class GitOperationResult:
+    """Captured output from a completed Git workflow operation."""
+
+    stdout: str = ""
+    stderr: str = ""
+
+    @property
+    def output(self) -> str:
+        """Return combined Git output for user-facing diagnostics."""
+
+        return "\n".join(part for part in (self.stdout.strip(), self.stderr.strip()) if part)
 
 
 class GitService:
@@ -110,11 +138,208 @@ class GitService:
 
         self._run(["git", "push"], check=True)
 
+    def fetch(
+        self,
+        *,
+        attempts: int,
+        wait_seconds: int,
+        on_retry: Callable[[int, int, GitError], None] | None = None,
+    ) -> GitOperationResult:
+        """Fetch remote refs, retrying only transient transport failures."""
+
+        return self._run_retryable(
+            ["git", "fetch", "--prune"],
+            attempts=attempts,
+            wait_seconds=wait_seconds,
+            on_retry=on_retry,
+        )
+
+    def pull(
+        self,
+        strategy: str,
+        *,
+        auto_stash: bool,
+        attempts: int,
+        wait_seconds: int,
+        on_retry: Callable[[int, int, GitError], None] | None = None,
+    ) -> GitOperationResult:
+        """Pull from upstream using merge or rebase with optional safe auto-stash."""
+
+        command = ["git", "pull", "--rebase" if strategy == "rebase" else "--no-rebase"]
+        return self._run_with_optional_stash(
+            command,
+            auto_stash=auto_stash,
+            attempts=attempts,
+            wait_seconds=wait_seconds,
+            on_retry=on_retry,
+        )
+
+    def sync(
+        self,
+        strategy: str,
+        *,
+        auto_stash: bool,
+        attempts: int,
+        wait_seconds: int,
+        on_retry: Callable[[int, int, GitError], None] | None = None,
+    ) -> GitOperationResult:
+        """Pull from upstream and push local commits after a successful pull."""
+
+        pull_result = self.pull(
+            strategy,
+            auto_stash=auto_stash,
+            attempts=attempts,
+            wait_seconds=wait_seconds,
+            on_retry=on_retry,
+        )
+        push_result = self._run_retryable(
+            ["git", "push"],
+            attempts=attempts,
+            wait_seconds=wait_seconds,
+            on_retry=on_retry,
+        )
+        return GitOperationResult(
+            stdout="\n".join(part for part in (pull_result.stdout, push_result.stdout) if part),
+            stderr="\n".join(part for part in (pull_result.stderr, push_result.stderr) if part),
+        )
+
     def current_branch(self) -> str:
         """Return current branch name."""
 
         result = self._run(["git", "branch", "--show-current"], check=True)
         return result.stdout.strip() or "HEAD"
+
+    def has_uncommitted_changes(self) -> bool:
+        """Return whether the working tree or index has uncommitted changes."""
+
+        result = self._run(["git", "status", "--porcelain=v1", "-z"], check=True)
+        return bool(result.stdout.strip("\0"))
+
+    def in_rebase(self) -> bool:
+        """Return whether the repository is currently in a rebase state."""
+
+        git_dir = self._git_dir()
+        return (git_dir / "rebase-merge").exists() or (git_dir / "rebase-apply").exists()
+
+    def in_merge(self) -> bool:
+        """Return whether the repository is currently in an unresolved merge state."""
+
+        return (self._git_dir() / "MERGE_HEAD").exists()
+
+    def abort_integration(self) -> None:
+        """Abort an active rebase or merge operation when possible."""
+
+        if self.in_rebase():
+            self._run(["git", "rebase", "--abort"], check=True)
+            return
+        if self.in_merge():
+            self._run(["git", "merge", "--abort"], check=True)
+
+    def _run_with_optional_stash(
+        self,
+        command: list[str],
+        *,
+        auto_stash: bool,
+        attempts: int,
+        wait_seconds: int,
+        on_retry: Callable[[int, int, GitError], None] | None = None,
+    ) -> GitOperationResult:
+        """Run a Git integration command and restore an auto-stash afterward."""
+
+        stash_ref: str | None = None
+        if auto_stash and self.has_uncommitted_changes():
+            stash_ref = self._create_autostash()
+        try:
+            return self._run_retryable(
+                command,
+                attempts=attempts,
+                wait_seconds=wait_seconds,
+                on_retry=on_retry,
+            )
+        finally:
+            if stash_ref is not None and not self.in_merge() and not self.in_rebase():
+                self._restore_autostash(stash_ref)
+
+    def _create_autostash(self) -> str | None:
+        """Create a named stash for local work and return its ref if one was made."""
+
+        before = self._stash_top_oid()
+        self._run(
+            ["git", "stash", "push", "--include-untracked", "-m", "CommitCraft auto-stash"],
+            check=True,
+        )
+        after = self._stash_top_oid()
+        return "stash@{0}" if after and after != before else None
+
+    def _restore_autostash(self, stash_ref: str) -> None:
+        """Restore a previously created auto-stash and classify apply conflicts."""
+
+        result = self._run(["git", "stash", "pop", "--index", stash_ref], check=False)
+        if result.returncode == 0:
+            return
+        if self._has_unmerged_paths(result.stdout + result.stderr):
+            raise GitConflictError("git_stash_conflict")
+        raise self._classify_failed_result(result)
+
+    def _stash_top_oid(self) -> str | None:
+        """Return the current top stash object id, or None when the stash is empty."""
+
+        result = self._run(["git", "stash", "list", "--format=%H", "-n", "1"], check=True)
+        return result.stdout.strip() or None
+
+    def _git_dir(self) -> Path:
+        """Return the resolved .git directory path for the current working tree."""
+
+        result = self._run(["git", "rev-parse", "--git-dir"], check=True)
+        git_dir = Path(result.stdout.strip())
+        if git_dir.is_absolute():
+            return git_dir
+        return Path(self.repo_path) / git_dir
+
+    def _run_retryable(
+        self,
+        command: list[str],
+        *,
+        attempts: int,
+        wait_seconds: int,
+        on_retry: Callable[[int, int, GitError], None] | None = None,
+    ) -> GitOperationResult:
+        """Run a Git command with retry support for transient failures only."""
+
+        last_error: GitError | None = None
+        for attempt in range(1, attempts + 1):
+            result = self._run(command, check=False)
+            if result.returncode == 0:
+                return GitOperationResult(stdout=result.stdout, stderr=result.stderr)
+            error = self._classify_failed_result(result)
+            if not isinstance(error, GitTransientError) or attempt >= attempts:
+                raise error
+            last_error = error
+            if on_retry is not None:
+                on_retry(attempt, attempts, error)
+            time.sleep(wait_seconds)
+        raise last_error or GitError("git_command_failed")
+
+    def _classify_failed_result(self, result: subprocess.CompletedProcess[str]) -> GitError:
+        """Map failed Git output to a retry, conflict, auth, or generic error."""
+
+        output = "\n".join(part for part in (result.stdout, result.stderr) if part).strip()
+        lowered = output.lower()
+        if self._has_unmerged_paths(output) or self.in_merge() or self.in_rebase():
+            return GitConflictError(output or "git_conflict")
+        if any(pattern in lowered for pattern in _AUTH_ERROR_PATTERNS):
+            return GitAuthError(output or "git_auth_failed")
+        if any(pattern in lowered for pattern in _TRANSIENT_ERROR_PATTERNS):
+            return GitTransientError(output or "git_transient_failure")
+        return GitError(output or "git_command_failed")
+
+    def _has_unmerged_paths(self, output: str) -> bool:
+        """Return whether Git output or status indicates unresolved conflicts."""
+
+        lowered = output.lower()
+        if any(pattern in lowered for pattern in _CONFLICT_ERROR_PATTERNS):
+            return True
+        return any("U" in file.status or file.status in {"AA", "DD"} for file in self._status_entries())
 
     def _untracked_file_snapshots(self, files: list[str]) -> str:
         """Return readable snapshots for selected untracked text files."""
@@ -185,3 +410,44 @@ class GitService:
             message = result.stderr.strip() or result.stdout.strip() or "Git command failed."
             raise GitError(message)
         return result
+
+
+_AUTH_ERROR_PATTERNS = (
+    "authentication failed",
+    "could not read username",
+    "could not read password",
+    "permission denied",
+    "access denied",
+    "403",
+    "401",
+    "repository not found",
+)
+
+_TRANSIENT_ERROR_PATTERNS = (
+    "could not resolve host",
+    "failed to connect",
+    "connection timed out",
+    "connection timeout",
+    "connection reset",
+    "network is unreachable",
+    "remote end hung up unexpectedly",
+    "the remote end hung up unexpectedly",
+    "operation timed out",
+    "tls connection",
+    "ssl",
+    "http 500",
+    "http 502",
+    "http 503",
+    "http 504",
+)
+
+_CONFLICT_ERROR_PATTERNS = (
+    "conflict",
+    "merge failed",
+    "fix conflicts",
+    "unmerged",
+    "you have divergent branches",
+    "cannot rebase",
+    "needs merge",
+    "could not apply",
+)

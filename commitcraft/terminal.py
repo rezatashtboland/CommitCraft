@@ -89,7 +89,10 @@ class TerminalUI:
         table.add_column("label", style="bold white")
         table.add_row("1", self.t("menu_commit"))
         table.add_row("2", self.t("menu_push"))
-        table.add_row("3", self.t("menu_settings"))
+        table.add_row("3", self.t("menu_fetch"))
+        table.add_row("4", self.t("menu_pull"))
+        table.add_row("5", self.t("menu_sync"))
+        table.add_row("6", self.t("menu_settings"))
         table.add_row("0", self.t("menu_exit"))
         self.console.print(Panel(table, border_style="green"))
         return Prompt.ask(
@@ -174,8 +177,8 @@ class TerminalUI:
         table.add_column(self.t("settings_value_column"), style="white")
         for key, label, value in rows:
             table.add_row(key, self.display(label), self.display(value))
-        table.add_row("9", self.t("settings_reset"), "")
-        table.add_row("10", self.t("settings_cancel"), "")
+        table.add_row("11", self.t("settings_reset"), "")
+        table.add_row("12", self.t("settings_cancel"), "")
         table.add_row("0", self.t("settings_back"), "")
         self.console.print(Panel(table, border_style="green"))
         return Prompt.ask(

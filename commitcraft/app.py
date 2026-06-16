@@ -22,11 +22,12 @@ from .config import (
     validate_bool,
     validate_language,
     validate_model,
+    validate_pull_strategy,
     validate_positive_int,
 )
 from .conventional import normalize_commit_message, validate_conventional_commit
 from .dependencies import Dependency, DependencyInstaller, PERSIAN_DEPENDENCIES
-from .git_service import ChangedFile, GitError, GitService
+from .git_service import ChangedFile, GitAuthError, GitConflictError, GitError, GitService
 from .i18n import DEFAULT_LANGUAGE, Translator
 from .terminal import TerminalUI
 
@@ -82,6 +83,20 @@ SETTINGS_OPTIONS = (
         validate_bool,
         hint_key="bool_options_hint",
     ),
+    SettingsOption(
+        "9",
+        "pull_strategy",
+        "pull_strategy",
+        validate_pull_strategy,
+        hint_key="pull_strategy_hint",
+    ),
+    SettingsOption(
+        "10",
+        "auto_stash",
+        "auto_stash",
+        validate_bool,
+        hint_key="bool_options_hint",
+    ),
 )
 
 
@@ -107,6 +122,12 @@ class CommitCraftApp:
                 elif choice == "2":
                     self._handle_push()
                 elif choice == "3":
+                    self._handle_fetch()
+                elif choice == "4":
+                    self._handle_pull()
+                elif choice == "5":
+                    self._handle_sync()
+                elif choice == "6":
                     self._handle_settings()
                     continue
                 elif choice == "0":
@@ -200,6 +221,16 @@ class CommitCraftApp:
             validate_bool,
             default=self.ui.translator.text("yes" if DEFAULT_CONVENTIONAL_COMMITS else "no"),
         )
+        pull_strategy = self._ask_validated(
+            self._prompt_with_hint("pull_strategy", "pull_strategy_hint"),
+            validate_pull_strategy,
+            default=self.ui.translator.text("pull_strategy_merge"),
+        )
+        auto_stash = self._ask_validated(
+            self._prompt_with_hint("auto_stash", "bool_options_hint"),
+            validate_bool,
+            default=self.ui.translator.text("yes"),
+        )
         return AppConfig.from_dict(
             {
                 "api_token": api_token,
@@ -209,6 +240,8 @@ class CommitCraftApp:
                 "retry_wait_seconds": retry_wait,
                 "retry_attempts": retry_attempts,
                 "conventional_commits": conventional_commits,
+                "pull_strategy": pull_strategy,
+                "auto_stash": auto_stash,
             }
         )
 
@@ -256,10 +289,10 @@ class CommitCraftApp:
             choice = self.ui.settings_menu(self._settings_rows())
             if choice == "0":
                 return
-            if choice == "10":
+            if choice == "12":
                 self.ui.info(self.ui.translator.text("settings_cancel_done"))
                 continue
-            if choice == "9":
+            if choice == "11":
                 self._reset_settings()
                 continue
             option = options.get(choice)
@@ -325,6 +358,8 @@ class CommitCraftApp:
                     value = f"{value} ({self.ui.translator.text('sensitive_masked')})"
             elif isinstance(value, bool):
                 value = self.ui.translator.text("yes" if value else "no")
+            elif option.field_name == "pull_strategy":
+                value = self.ui.translator.text(f"pull_strategy_{value}")
             rows.append((option.key, self.ui.translator.text(option.label_key), str(value)))
         return rows
 
@@ -543,6 +578,119 @@ class CommitCraftApp:
         except GitError as exc:
             self.ui.error(self._friendly_error(exc))
 
+    def _handle_fetch(self) -> None:
+        """Fetch current repository remotes with retryable network handling."""
+
+        if self.config is None:
+            return
+        try:
+            self._show_branch_and_confirm("fetch_confirm")
+            self.ui.info(self.ui.translator.text("fetching"))
+            result = self.git.fetch(
+                attempts=self.config.retry_attempts,
+                wait_seconds=self.config.retry_wait_seconds,
+                on_retry=self._show_git_retry,
+            )
+            self._show_git_output(result.output)
+            self.ui.success(self.ui.translator.text("fetch_done"))
+        except GitError as exc:
+            self.ui.error(self._friendly_error(exc))
+
+    def _handle_pull(self) -> None:
+        """Pull current branch using configured integration settings."""
+
+        if self.config is None:
+            return
+        self._handle_integration_operation("pull")
+
+    def _handle_sync(self) -> None:
+        """Pull current branch and push it after a successful integration."""
+
+        if self.config is None:
+            return
+        self._handle_integration_operation("sync")
+
+    def _handle_integration_operation(self, operation: str) -> None:
+        """Run a pull-like operation with localized reporting and conflict guidance."""
+
+        if self.config is None:
+            return
+        try:
+            self._show_branch_and_confirm(f"{operation}_confirm")
+            self.ui.info(self._strategy_summary())
+            self.ui.info(self.ui.translator.text(f"{operation}ing"))
+            if operation == "pull":
+                result = self.git.pull(
+                    self.config.pull_strategy,
+                    auto_stash=self.config.auto_stash,
+                    attempts=self.config.retry_attempts,
+                    wait_seconds=self.config.retry_wait_seconds,
+                    on_retry=self._show_git_retry,
+                )
+            else:
+                result = self.git.sync(
+                    self.config.pull_strategy,
+                    auto_stash=self.config.auto_stash,
+                    attempts=self.config.retry_attempts,
+                    wait_seconds=self.config.retry_wait_seconds,
+                    on_retry=self._show_git_retry,
+                )
+            self._show_git_output(result.output)
+            self.ui.success(self.ui.translator.text(f"{operation}_done"))
+        except GitConflictError as exc:
+            self._report_conflict(exc)
+        except GitError as exc:
+            self.ui.error(self._friendly_error(exc))
+
+    def _show_branch_and_confirm(self, confirm_key: str) -> None:
+        """Show the current branch and stop the operation when user declines."""
+
+        branch = self.git.current_branch()
+        self.ui.info(f"{self.ui.translator.text('current_branch')}: {branch}")
+        if not self.ui.confirm(self.ui.translator.text(confirm_key), default=True):
+            raise GitError("operation_cancelled")
+
+    def _strategy_summary(self) -> str:
+        """Return a localized summary of pull strategy and auto-stash settings."""
+
+        if self.config is None:
+            return ""
+        strategy = self.ui.translator.text(f"pull_strategy_{self.config.pull_strategy}")
+        auto_stash = self.ui.translator.text("yes" if self.config.auto_stash else "no")
+        return (
+            f"{self.ui.translator.text('pull_strategy')}: {strategy} | "
+            f"{self.ui.translator.text('auto_stash')}: {auto_stash}"
+        )
+
+    def _show_git_output(self, output: str) -> None:
+        """Show Git output when available without hiding important diagnostics."""
+
+        if output.strip():
+            self.ui.panel(self.ui.translator.text("git_output"), output.strip(), style="cyan")
+
+    def _report_conflict(self, exc: GitConflictError) -> None:
+        """Show conflict details and explicit recovery guidance."""
+
+        message = self._friendly_error(exc)
+        self.ui.error(message)
+        if str(exc).strip() and str(exc) not in {"git_conflict", "git_stash_conflict"}:
+            self.ui.panel(self.ui.translator.text("git_output"), str(exc).strip(), style="red")
+        guidance_key = "rebase_conflict_guidance" if self.git.in_rebase() else "merge_conflict_guidance"
+        if str(exc) == "git_stash_conflict":
+            guidance_key = "stash_conflict_guidance"
+        self.ui.warning(self.ui.translator.text(guidance_key))
+
+    def _show_git_retry(self, attempt: int, total: int, exc: Exception) -> None:
+        """Show retry progress for retryable Git network failures."""
+
+        if self.config is None:
+            return
+        self.ui.warning(
+            f"{self.ui.translator.text('git_retry')} "
+            f"{attempt}/{total} "
+            f"({self.config.retry_wait_seconds} {self.ui.translator.text('seconds_short')})"
+        )
+
     def _show_ai_retry(self, attempt: int, total: int, exc: Exception) -> None:
         """Show retry progress for failed AI requests."""
 
@@ -562,12 +710,20 @@ class CommitCraftApp:
             "git_missing",
             "git_not_repo",
             "git_command_failed",
+            "git_conflict",
+            "git_stash_conflict",
+            "git_auth_failed",
+            "operation_cancelled",
             "ai_empty_message",
             "ai_empty_choices",
             "ai_missing_content",
             "ai_request_failed",
         }:
             return self.ui.translator.text(message)
+        if isinstance(exc, GitConflictError):
+            return self.ui.translator.text("git_conflict")
+        if isinstance(exc, GitAuthError):
+            return self.ui.translator.text("git_auth_failed")
         if isinstance(exc, GitError):
             return self.ui.translator.text("git_command_failed")
         if isinstance(exc, AIClientError):

@@ -18,6 +18,9 @@ DEFAULT_RETRY_WAIT_SECONDS = 5
 DEFAULT_RETRY_ATTEMPTS = 10
 DEFAULT_MODEL = "gpt-4o-mini"
 DEFAULT_CONVENTIONAL_COMMITS = True
+DEFAULT_PULL_STRATEGY = "merge"
+DEFAULT_AUTO_STASH = True
+PULL_STRATEGIES = {"merge", "rebase"}
 
 
 @dataclass
@@ -32,6 +35,8 @@ class AppConfig:
     retry_attempts: int = DEFAULT_RETRY_ATTEMPTS
     model: str = DEFAULT_MODEL
     conventional_commits: bool = DEFAULT_CONVENTIONAL_COMMITS
+    pull_strategy: str = DEFAULT_PULL_STRATEGY
+    auto_stash: bool = DEFAULT_AUTO_STASH
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AppConfig":
@@ -57,6 +62,10 @@ class AppConfig:
                 data.get("conventional_commits"),
                 DEFAULT_CONVENTIONAL_COMMITS,
             ),
+            pull_strategy=validate_pull_strategy(
+                str(data.get("pull_strategy") or DEFAULT_PULL_STRATEGY)
+            ),
+            auto_stash=_bool(data.get("auto_stash"), DEFAULT_AUTO_STASH),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -171,6 +180,15 @@ def validate_bool(value: str) -> bool:
     if normalized in {"no", "n", "false", "0", "off", "خیر", "نه", "خاموش"}:
         return False
     raise ValueError("invalid_bool")
+
+
+def validate_pull_strategy(value: str) -> str:
+    """Validate and normalize the Git pull integration strategy."""
+
+    normalized = value.strip().lower()
+    if normalized in PULL_STRATEGIES:
+        return normalized
+    raise ValueError("invalid_pull_strategy")
 
 
 def _positive_int(value: Any, default: int) -> int:
