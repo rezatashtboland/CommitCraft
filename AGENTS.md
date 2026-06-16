@@ -62,3 +62,8 @@ Rules:
 - Handle errors transparently, never with a silent crash.
 - Validate user input.
 - Never print sensitive values (tokens) in output/logs.
+
+## 9. Documentation Sync Rule
+- Whenever a new feature, command, option, or setting is added to the project, or an existing behavior is changed, README.md MUST be updated within the same change	to reflect that feature. A code change that introduces user-facing functionality
+- without a corresponding README.md update is considered incomplete.
+- The README update must include the purpose of the feature, how to use it, and an example where appropriate. It must stay consistent with the existing language, 	tone, and structure of README.md, and must not document anything that does not exist in the code.

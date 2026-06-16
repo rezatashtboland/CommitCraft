@@ -1,79 +1,154 @@
 # CommitCraft
 
-CommitCraft is an AI-powered Python assistant that detects Git changes, asks a GapGPT-compatible ChatGPT API for a clean commit message, commits selected files, and keeps a colorful terminal menu open for more actions.
+CommitCraft is an AI-powered Python CLI for Git repositories. It detects
+uncommitted changes, lets you choose what to commit, asks a GapGPT-compatible
+chat-completions API for a commit message, and runs Git operations from a
+colorful terminal menu.
+
+Current version: **1.1.0**
 
 ## English
 
 ### Features
 
-- Colorful terminal UI with `commit`, `push`, `settings`, and `exit` options.
-- `commit` is the default active menu option.
-- First-run configuration stored at `~/.commitcraft/config.json`.
-- Separate UI language and AI commit-message language.
-- Conventional Commits mode with AI-inferred type, scope, and breaking-change footer support.
-- Persian and English support, with English as the first-run default.
-- Persian RTL shaping installed on demand through `arabic-reshaper` and `python-bidi`.
-- Retry management for unstable AI responses.
-- Cross-platform support for Windows, Linux, and macOS.
-- Automatic dependency check and installation through `pip`.
-- In-app settings editor with masked secrets, validation, reset, and instant apply.
+- Interactive terminal menu with commit, push, fetch, pull, sync, settings, and exit actions.
+- Mandatory working-copy path prompt before startup, with validation against a real Git repository.
+- Persistent repository path history stored separately from the main settings file.
+- First-run configuration wizard stored at `~/.commitcraft/config.json`.
+- GapGPT/OpenAI-compatible chat-completions request for AI-generated commit messages.
+- Independent display language and commit-message language settings.
+- English and Persian display support, with English as the default language.
+- Persian RTL shaping installed only when Persian is selected.
+- Conventional Commits mode with validation before committing.
+- Optional split flow for committing unrelated selected files as separate commits.
+- Git fetch, pull, and sync retries for transient network failures.
+- Pull strategy setting for merge or rebase.
+- Optional auto-stash during pull and sync, including untracked files.
+- In-app settings editor with masked API token, validation, reset, and immediate apply.
+- Safe Git staging for deleted files by using `git rm --ignore-unmatch`.
+- Captured subprocess output decoded safely to avoid crashes on malformed text.
 
 ### Requirements
 
 - Python 3.10 or newer
 - Git installed and available in `PATH`
 - A GapGPT-compatible API token
+- Network access to the configured AI API URL
+- Optional Git remote/upstream configuration for push, fetch, pull, and sync
 
-### Install
+Runtime Python dependencies:
+
+```text
+requests>=2.31.0
+rich>=13.7.0
+```
+
+Optional Persian display dependencies:
+
+```text
+python-bidi>=0.4.2
+arabic-reshaper>=3.0.0
+```
+
+### Installation
+
+Install dependencies from the repository:
 
 ```bash
 python -m pip install -r requirements.txt
 ```
 
-If core dependencies are missing, the script also attempts to install them automatically on startup. Persian display dependencies are installed only when Persian is selected.
+You can also install the project in editable mode to use the `commitcraft`
+console command defined by `pyproject.toml`:
 
-### Run
+```bash
+python -m pip install -e .
+```
+
+If core dependencies are missing at startup, CommitCraft attempts to install
+them automatically with the current Python executable. Persian display
+dependencies are checked and installed only when Persian is selected.
+
+### How To Run
+
+Run from the repository checkout:
 
 ```bash
 python commitcraft_cli.py
 ```
 
-Every run starts by asking for the working-copy folder path. This path is
-mandatory and must point to an existing Git repository. CommitCraft remembers
-the last successfully confirmed path in a standalone path-history file, separate
-from `~/.commitcraft/config.json`, and offers it as the next run's default.
+If installed as a package:
 
-On first run, CommitCraft asks for:
+```bash
+commitcraft
+```
 
-- AI API token
-- AI API URL
-- Display language: `fa` or `en`
-- AI output language for commit messages: `fa` or `en`
-- Retry wait time, default `5`
-- Retry attempts, default `10`
-- Conventional Commits mode, default `true`
+At startup, CommitCraft asks for the working-copy folder path. The path is
+required, must exist, must be a directory, and must be inside a Git working
+tree. The last confirmed path is appended to:
 
-### Workflow
+```text
+~/.commitcraft/last_repository_paths.log
+```
+
+When the stored path is still valid, it is offered as the next run's default.
+
+### Main Menu
+
+The interactive menu accepts these options:
+
+| Option | Action |
+| --- | --- |
+| `1` or Enter | Commit changes |
+| `2` | Push commits |
+| `3` | Fetch from remote |
+| `4` | Pull from remote |
+| `5` | Sync with remote |
+| `6` | Settings |
+| `0` | Exit |
+
+The default menu choice is `1`.
+
+### Commit Workflow
 
 1. Choose `Commit changes` or press Enter.
-2. Review uncommitted files.
-3. All files are selected by default.
-4. Enter file numbers to remove unwanted files, separated by commas.
-5. Optionally split unrelated files into separate commits.
-6. Review and edit the AI-generated commit message.
-7. CommitCraft validates Conventional Commits when enabled, stages selected files, and creates the commit.
+2. Review the table of uncommitted files and Git status codes.
+3. Press Enter to keep all files selected, or enter comma-separated file numbers to remove.
+4. Optionally split the selected files into separate commit groups.
+5. CommitCraft stages the selected files.
+6. CommitCraft sends the staged diff and staged file status to the AI.
+7. Review the generated message and edit it inline if needed.
+8. If Conventional Commits mode is enabled, CommitCraft validates the message.
+9. Confirm the final message to create the commit.
 
-The menu remains active after every commit or push. Exit only happens through the `Exit` option or `Ctrl+C`.
+For deleted paths, CommitCraft stages with `git rm --ignore-unmatch` instead
+of `git add` to avoid pathspec errors.
 
-### Configuration
+### Git Remote Workflows
 
-Config file:
+- `Push commits` shows the current branch, asks for confirmation, and runs `git push`.
+- `Fetch from remote` shows the current branch, asks for confirmation, and runs `git fetch --prune`.
+- `Pull from remote` runs `git pull --no-rebase` or `git pull --rebase` based on settings.
+- `Sync with remote` runs the configured pull operation first, then `git push`
+  after a successful pull.
+
+Fetch, pull, and sync retry only retryable transport failures, such as DNS,
+timeout, connection reset, TLS/SSL, and HTTP 5xx failures. Authentication
+errors and merge/rebase/stash conflicts are reported without retrying.
+
+When auto-stash is enabled and local changes exist, pull and sync create a
+`CommitCraft auto-stash` with `--include-untracked` and restore it after the
+integration operation if the repository is not left in a merge or rebase state.
+
+### Settings
+
+Settings are stored in:
 
 ```text
 ~/.commitcraft/config.json
 ```
 
-Example:
+Current default-backed config shape:
 
 ```json
 {
@@ -84,57 +159,127 @@ Example:
   "retry_wait_seconds": 5,
   "retry_attempts": 10,
   "model": "gpt-4o-mini",
-  "conventional_commits": true
+  "conventional_commits": true,
+  "pull_strategy": "merge",
+  "auto_stash": true
 }
 ```
 
-You can also choose `Settings` from the main menu to view and edit every
-configuration value without opening the JSON file manually:
+On first run, CommitCraft asks for:
 
-- API token is always masked and never printed in full.
-- API URL, model name, UI language, model output language, retry wait, retry
-  attempts, and Conventional Commits mode are individually editable.
-- UI language and model output language remain independent and accept only
-  Persian/`fa` or English/`en`.
-- Selecting Persian installs Persian display support if it is not already available.
-- Numeric values must be positive, and the API URL must be a valid HTTP(S) URL.
-- Changes are saved to `~/.commitcraft/config.json` and applied immediately.
-- `Cancel without saving` discards the current edit, `Reset to defaults`
-  restores default values, and `Back to main menu` closes the submenu.
+- AI API token
+- AI API URL, defaulting to `https://api.gapgpt.app/v1/chat/completions`
+- Display language, `English` or `Persian`
+- Commit message language, `English` or `Persian`
+- Retry wait seconds, default `5`
+- Retry attempts, default `10`
+- Conventional Commits mode, default `yes`
+- Pull strategy, default `merge`
+- Auto-stash, default `yes`
 
-### Commit Message Format
+The Settings menu can edit:
 
-The AI is instructed to return:
+- API token
+- AI API URL
+- Model name
+- Display language
+- Commit message language
+- Retry wait seconds
+- Retry attempts
+- Conventional Commits mode
+- Pull strategy
+- Auto-stash
 
-- First line in Conventional Commit style, such as `feat(cli): add AI commit assistant`
-- Standard types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, and `revert`
-- Optional body and footer separated by a blank line
-- Breaking changes using `!` plus a `BREAKING CHANGE:` footer
-- No explanations outside the commit message
-- No Markdown code fences
+Validation rules:
+
+- API token and model name cannot be empty.
+- API URL must be a valid HTTP or HTTPS URL.
+- Languages must be English or Persian.
+- Retry values must be positive integers.
+- Boolean values accept yes/no-like values, including English and Persian forms.
+- Pull strategy must be `merge` or `rebase`.
+- API token is masked in the settings table and is never printed in full.
+
+The settings submenu also includes reset to defaults, cancel without saving,
+and back to main menu actions.
+
+### Commit Message Rules
+
+When Conventional Commits mode is enabled, the AI is prompted to return:
+
+- A first line like `type(scope): description`, `type: description`, or a `!` breaking form.
+- One of these types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`,
+  `test`, `build`, `ci`, `chore`, `revert`.
+- A short lowercase scope inferred from the staged diff when useful.
+- An imperative, present-tense description without a final period.
+- A first line under 72 characters.
+- Optional body or footer separated from the header by a blank line.
+- `BREAKING CHANGE:` footer when the header uses `!`.
+- No Markdown code fences and no explanation outside the commit message.
+
+When Conventional Commits mode is disabled, the AI is prompted for one concise
+free-form commit message in the configured commit-message language.
+
+### Usage Examples
+
+Run the local script:
+
+```bash
+python commitcraft_cli.py
+```
+
+Install and run the console command:
+
+```bash
+python -m pip install -e .
+commitcraft
+```
+
+Example commit flow input:
+
+```text
+Working copy folder path: /path/to/repo
+Choose an option [1]: 1
+Remove []: 2,4
+Split unrelated changes into separate commits? [no]: no
+Edit commit message, or press Enter to keep it:
+Commit with this message? [yes]: yes
+```
 
 ## فارسی
 
-کامیت‌کرفت یک دستیار پایتونی هوشمند است که تغییرات Git را تشخیص می‌دهد، آن‌ها را برای یک API سازگار با GapGPT و ChatGPT می‌فرستد، پیام کامیت مناسب می‌گیرد، فایل‌های انتخاب‌شده را stage می‌کند و عملیات commit را انجام می‌دهد.
+کامیت‌کرفت یک ابزار خط فرمان پایتونی برای مخزن‌های Git است. این برنامه
+تغییرات کامیت‌نشده را پیدا می‌کند، اجازه می‌دهد فایل‌های کامیت را انتخاب
+کنید، از یک API سازگار با GapGPT برای پیام کامیت کمک می‌گیرد و عملیات Git را
+از یک منوی ترمینالی رنگی اجرا می‌کند.
+
+نسخه فعلی: **1.1.0**
 
 ### امکانات
 
-- رابط ترمینالی رنگی و جذاب با گزینه‌های `commit`، `push`، `settings` و `exit`
-- گزینه پیش‌فرض منو روی `commit`
-- ساخت تنظیمات در اجرای اول و ذخیره در `~/.commitcraft/config.json`
-- استقلال زبان رابط کاربری از زبان خروجی مدل
-- پشتیبانی از فارسی و انگلیسی، با انگلیسی به‌عنوان پیش‌فرض اجرای اول
-- نصب پشتیبانی نمایش راست‌به‌چپ فارسی فقط هنگام انتخاب فارسی
-- تلاش مجدد هنگام پاسخ نامناسب یا خطای سرور
-- پشتیبانی از Windows، Linux و macOS
-- بررسی و نصب خودکار وابستگی‌ها با `pip`
-- ویرایش تنظیمات داخل برنامه با مخفی‌سازی مقادیر حساس، اعتبارسنجی، بازنشانی و اعمال فوری
+- منوی تعاملی ترمینال با عملیات commit، push، fetch، pull، sync، settings و exit.
+- دریافت اجباری مسیر پوشه کاری پیش از شروع و اعتبارسنجی آن به‌عنوان مخزن Git.
+- ذخیره تاریخچه مسیر پوشه کاری جدا از فایل تنظیمات اصلی.
+- ساخت تنظیمات اجرای اول در `~/.commitcraft/config.json`.
+- تولید پیام کامیت با API سازگار با chat-completions.
+- جدایی زبان نمایش برنامه از زبان پیام کامیت.
+- پشتیبانی از نمایش انگلیسی و فارسی، با انگلیسی به‌عنوان پیش‌فرض.
+- نصب وابستگی‌های نمایش راست‌به‌چپ فارسی فقط هنگام انتخاب فارسی.
+- حالت Conventional Commits همراه با اعتبارسنجی پیش از commit.
+- امکان تقسیم فایل‌های انتخاب‌شده در چند commit جدا.
+- تلاش مجدد برای fetch، pull و sync فقط در خطاهای موقت شبکه.
+- تنظیم روش pull بین merge و rebase.
+- auto-stash اختیاری هنگام pull و sync، همراه با فایل‌های untracked.
+- ویرایش تنظیمات داخل برنامه با مخفی‌سازی توکن، اعتبارسنجی، بازنشانی و اعمال فوری.
+- stage کردن امن فایل‌های حذف‌شده با `git rm --ignore-unmatch`.
 
 ### پیش‌نیازها
 
-- پایتون نسخه 3.10 یا جدیدتر
-- نصب بودن Git و در دسترس بودن آن در `PATH`
+- Python نسخه 3.10 یا جدیدتر
+- Git نصب‌شده و قابل دسترس در `PATH`
 - توکن API سازگار با GapGPT
+- دسترسی شبکه به آدرس API تنظیم‌شده
+- تنظیم بودن remote/upstream برای عملیات push، fetch، pull و sync
 
 ### نصب
 
@@ -142,7 +287,15 @@ The AI is instructed to return:
 python -m pip install -r requirements.txt
 ```
 
-اگر وابستگی‌های اصلی نصب نباشند، برنامه هنگام اجرا تلاش می‌کند آن‌ها را خودکار نصب کند. وابستگی‌های نمایش فارسی فقط هنگام انتخاب فارسی نصب می‌شوند.
+برای استفاده از دستور `commitcraft` می‌توانید پروژه را به‌صورت editable نصب کنید:
+
+```bash
+python -m pip install -e .
+```
+
+اگر وابستگی‌های اصلی هنگام شروع برنامه نصب نباشند، برنامه تلاش می‌کند آن‌ها
+را با همان Python جاری نصب کند. وابستگی‌های نمایش فارسی فقط هنگام انتخاب
+فارسی بررسی و نصب می‌شوند.
 
 ### اجرا
 
@@ -150,40 +303,62 @@ python -m pip install -r requirements.txt
 python commitcraft_cli.py
 ```
 
-در هر اجرا ابتدا مسیر پوشه کاری پرسیده می‌شود. این مسیر اجباری است و باید به
-یک مخزن Git موجود اشاره کند. کامیت‌کرفت آخرین مسیر تأییدشده را در یک فایل
-تاریخچه مستقل، جدا از `~/.commitcraft/config.json`، نگه می‌دارد و در اجرای
-بعدی به‌عنوان مقدار پیش‌فرض پیشنهاد می‌دهد.
+یا پس از نصب بسته:
 
-در اجرای اول این موارد پرسیده می‌شود:
+```bash
+commitcraft
+```
 
-- توکن API هوش مصنوعی
-- آدرس API هوش مصنوعی
-- زبان نمایش برنامه: `fa` یا `en`
-- زبان خروجی مدل برای پیام کامیت: `fa` یا `en`
-- زمان انتظار بین تلاش‌ها، پیش‌فرض `5`
-- تعداد تلاش مجدد، پیش‌فرض `10`
+در شروع برنامه، مسیر پوشه کاری پرسیده می‌شود. این مسیر باید وجود داشته باشد،
+پوشه باشد و داخل یک working tree گیت باشد. آخرین مسیر معتبر در فایل زیر ذخیره
+می‌شود:
 
-### روند استفاده
+```text
+~/.commitcraft/last_repository_paths.log
+```
 
-1. گزینه `کامیت تغییرات` را انتخاب کنید یا Enter بزنید.
-2. فهرست فایل‌های تغییرکرده را ببینید.
-3. همه فایل‌ها به‌صورت پیش‌فرض انتخاب هستند.
-4. شماره فایل‌هایی را که نمی‌خواهید کامیت شوند، با کاما وارد کنید.
-5. پیام کامیت تولیدشده توسط هوش مصنوعی را تأیید کنید.
-6. کامیت‌کرفت فایل‌های انتخاب‌شده را stage کرده و commit را ایجاد می‌کند.
+### منوی اصلی
 
-بعد از commit یا push برنامه بسته نمی‌شود و منو فعال می‌ماند. خروج فقط با گزینه `Exit` یا `Ctrl+C` انجام می‌شود.
+| گزینه | عملیات |
+| --- | --- |
+| `1` یا Enter | کامیت تغییرات |
+| `2` | پوش کردن کامیت‌ها |
+| `3` | fetch از remote |
+| `4` | pull از remote |
+| `5` | sync با remote |
+| `6` | تنظیمات |
+| `0` | خروج |
+
+گزینه پیش‌فرض منو `1` است.
+
+### روند کامیت
+
+1. گزینه commit را انتخاب کنید یا Enter بزنید.
+2. فایل‌های تغییرکرده و وضعیت Git آن‌ها را ببینید.
+3. برای انتخاب همه فایل‌ها Enter بزنید یا شماره فایل‌های حذفی را با کاما وارد کنید.
+4. در صورت نیاز فایل‌های انتخاب‌شده را به چند گروه کامیت تقسیم کنید.
+5. برنامه فایل‌های انتخاب‌شده را stage می‌کند.
+6. diff آماده‌شده برای تولید پیام کامیت به AI فرستاده می‌شود.
+7. پیام تولیدشده را بررسی و در صورت نیاز ویرایش کنید.
+8. اگر Conventional Commits فعال باشد، پیام اعتبارسنجی می‌شود.
+9. پیام نهایی را تأیید کنید تا commit ساخته شود.
+
+### عملیات Remote
+
+- push شاخه فعلی را پس از تأیید با `git push` ارسال می‌کند.
+- fetch پس از تأیید `git fetch --prune` را اجرا می‌کند.
+- pull بسته به تنظیمات با merge یا rebase اجرا می‌شود.
+- sync ابتدا pull تنظیم‌شده را اجرا می‌کند و پس از موفقیت، `git push` می‌زند.
 
 ### تنظیمات
 
-مسیر فایل تنظیمات:
+فایل تنظیمات:
 
 ```text
 ~/.commitcraft/config.json
 ```
 
-نمونه:
+نمونه ساختار فعلی:
 
 ```json
 {
@@ -194,32 +369,20 @@ python commitcraft_cli.py
   "retry_wait_seconds": 5,
   "retry_attempts": 10,
   "model": "gpt-4o-mini",
-  "conventional_commits": true
+  "conventional_commits": true,
+  "pull_strategy": "merge",
+  "auto_stash": true
 }
 ```
 
-همچنین می‌توانید از منوی اصلی گزینه `تنظیمات` را انتخاب کنید و همه مقادیر
-پیکربندی را بدون ویرایش دستی فایل JSON ببینید یا تغییر دهید:
+تنظیمات قابل ویرایش شامل توکن API، آدرس API، نام مدل، زبان نمایش، زبان پیام
+کامیت، زمان انتظار تلاش مجدد، تعداد تلاش مجدد، حالت Conventional Commits،
+روش pull و auto-stash است. توکن در جدول تنظیمات مخفی نمایش داده می‌شود.
 
-- توکن API همیشه مخفی نمایش داده می‌شود و هیچ‌وقت کامل چاپ نمی‌شود.
-- آدرس API، نام مدل، زبان رابط کاربری، زبان خروجی مدل، زمان انتظار، تعداد
-  تلاش مجدد و حالت کامیت استاندارد به‌صورت جداگانه قابل ویرایش هستند.
-- زبان رابط کاربری و زبان خروجی مدل مستقل هستند و فقط فارسی/`fa` یا
-  انگلیسی/`en` را می‌پذیرند.
-- انتخاب فارسی در صورت نیاز پشتیبانی نمایش فارسی را نصب می‌کند.
-- مقدارهای عددی باید مثبت باشند و آدرس API باید یک URL معتبر HTTP(S) باشد.
-- تغییرات در `~/.commitcraft/config.json` ذخیره و بلافاصله در همان نشست اعمال می‌شوند.
-- گزینه `لغو بدون ذخیره` ویرایش جاری را لغو می‌کند، گزینه
-  `بازنشانی به پیش‌فرض‌ها` مقادیر پیش‌فرض را برمی‌گرداند و گزینه
-  `بازگشت به منوی اصلی` زیرمنو را می‌بندد.
+### قالب پیام کامیت
 
-### ساختار پیام کامیت
-
-مدل هوش مصنوعی باید این ساختار را رعایت کند:
-
-- خط اول با قالب Conventional Commit، مثل `feat(cli): add AI commit assistant`
-- نوع‌های استاندارد: `feat`، `fix`، `docs`، `style`، `refactor`، `perf`، `test`، `build`، `ci`، `chore` و `revert`
-- بدنه و پاورقی اختیاری با یک خط خالی از عنوان جدا می‌شوند
-- تغییرات ناسازگار با `!` و پاورقی `BREAKING CHANGE:` مشخص می‌شوند
-- بدون توضیح اضافه بیرون از پیام کامیت
-- بدون Markdown code fence
+در حالت Conventional Commits، پیام باید با یکی از نوع‌های `feat`، `fix`،
+`docs`، `style`، `refactor`، `perf`، `test`، `build`، `ci`، `chore` یا
+`revert` شروع شود، خط اول حداکثر 72 نویسه باشد، توضیح حالت امری داشته باشد،
+با نقطه تمام نشود و در صورت استفاده از `!` دارای footer با
+`BREAKING CHANGE:` باشد.
