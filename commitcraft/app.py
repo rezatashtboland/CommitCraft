@@ -4,14 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import replace
+from pathlib import Path
 
 from rich.table import Table
 
-from .ai_client import AIClientError, GapGPTClient
+from .ai_client import AIClient, AIClientError
 from .changelog import ChangelogGenerator
 from .config import (
-    DEFAULT_API_URL,
+    AIProviderConfig,
     DEFAULT_CONVENTIONAL_COMMITS,
+    DEFAULT_PROVIDER_NAME,
     DEFAULT_RETRY_ATTEMPTS,
     DEFAULT_RETRY_WAIT_SECONDS,
     AppConfig,
@@ -25,11 +27,19 @@ from .config import (
     validate_model,
     validate_pull_strategy,
     validate_positive_int,
+    validate_provider_name,
+    validate_provider_type,
+    provider_defaults,
 )
-from .conventional import normalize_commit_message, validate_conventional_commit
+from .conventional import normalize_commit_message
 from .dependencies import Dependency, DependencyInstaller, PERSIAN_DEPENDENCIES
 from .git_service import ChangedFile, GitAuthError, GitConflictError, GitError, GitService
 from .i18n import DEFAULT_LANGUAGE, Translator
+from .repository_state import (
+    GitRepositoryError,
+    RepositoryPathStore,
+    validate_repository_path,
+)
 from . import __version__
 from .terminal import TerminalUI
 
@@ -59,8 +69,6 @@ class SettingsOption:
 
 
 SETTINGS_OPTIONS = (
-    SettingsOption("1", "api_token", "api_token", validate_api_token, password=True),
-    SettingsOption("2", "api_url", "api_url", validate_api_url),
     SettingsOption("3", "model_name", "model", validate_model),
     SettingsOption(
         "4",
@@ -87,13 +95,20 @@ SETTINGS_OPTIONS = (
     ),
     SettingsOption(
         "9",
+        "auto_split_commits",
+        "auto_split_commits",
+        validate_bool,
+        hint_key="bool_options_hint",
+    ),
+    SettingsOption(
+        "10",
         "pull_strategy",
         "pull_strategy",
         validate_pull_strategy,
         hint_key="pull_strategy_hint",
     ),
     SettingsOption(
-        "10",
+        "11",
         "auto_stash",
         "auto_stash",
         validate_bool,
@@ -107,6 +122,7 @@ class CommitCraftApp:
 
     def __init__(self, repo_path: str) -> None:
         self.config_manager = ConfigManager()
+        self.repository_store = RepositoryPathStore()
         self.translator = Translator(DEFAULT_LANGUAGE)
         self.ui = TerminalUI(self.translator)
         self.git = GitService(repo_path)
@@ -118,7 +134,7 @@ class CommitCraftApp:
         try:
             self._bootstrap()
             while True:
-                choice = self.ui.menu()
+                choice = self.ui.menu(self._repository_header())
                 if choice in {"", "1"}:
                     self._handle_commit()
                 elif choice == "2":
@@ -193,10 +209,17 @@ class CommitCraftApp:
             validate_api_token,
             password=True,
         )
+        provider_name = DEFAULT_PROVIDER_NAME
+        provider_defaults_data = provider_defaults(provider_name)
         api_url = self._ask_validated(
             f"{self.ui.translator.text('api_url')} ({self.ui.translator.text('leave_default')})",
             validate_api_url,
-            default=DEFAULT_API_URL,
+            default=provider_defaults_data["api_url"],
+        )
+        model = self._ask_validated(
+            self.ui.translator.text("model_name"),
+            validate_model,
+            default=provider_defaults_data["model"],
         )
         ui_language = self._ask_validated(
             self._prompt_with_hint("ui_language", "language_options_hint"),
@@ -235,10 +258,23 @@ class CommitCraftApp:
             validate_bool,
             default=self.ui.translator.text("yes"),
         )
+        auto_split_commits = self._ask_validated(
+            self._prompt_with_hint("auto_split_commits", "bool_options_hint"),
+            validate_bool,
+            default=self.ui.translator.text("no"),
+        )
         return AppConfig.from_dict(
             {
-                "api_token": api_token,
-                "api_url": api_url,
+                "providers": {
+                    provider_name: {
+                        "name": provider_name,
+                        "provider_type": provider_defaults_data["provider_type"],
+                        "api_token": api_token,
+                        "api_url": api_url,
+                        "model": model,
+                    }
+                },
+                "active_provider": provider_name,
                 "ui_language": ui_language,
                 "model_output_language": model_language,
                 "retry_wait_seconds": retry_wait,
@@ -246,6 +282,7 @@ class CommitCraftApp:
                 "conventional_commits": conventional_commits,
                 "pull_strategy": pull_strategy,
                 "auto_stash": auto_stash,
+                "auto_split_commits": auto_split_commits,
             }
         )
 
@@ -293,11 +330,20 @@ class CommitCraftApp:
             choice = self.ui.settings_menu(self._settings_rows())
             if choice == "0":
                 return
-            if choice == "12":
+            if choice == "13":
                 self.ui.info(self.ui.translator.text("settings_cancel_done"))
                 continue
-            if choice == "11":
+            if choice == "12":
                 self._reset_settings()
+                continue
+            if choice == "1":
+                self._add_or_update_provider()
+                continue
+            if choice == "2":
+                self._switch_provider()
+                continue
+            if choice == "14":
+                self._change_working_copy()
                 continue
             option = options.get(choice)
             if option is None:
@@ -354,18 +400,151 @@ class CommitCraftApp:
             return []
 
         rows: list[tuple[str, str, str]] = []
+        rows.append(
+            (
+                "1",
+                self.ui.translator.text("provider_add_update"),
+                self._provider_summary(self.config.active_ai_provider()),
+            )
+        )
+        rows.append(
+            (
+                "2",
+                self.ui.translator.text("active_provider"),
+                self.config.active_provider,
+            )
+        )
         for option in SETTINGS_OPTIONS:
-            value = getattr(self.config, option.field_name)
-            if option.field_name == "api_token":
-                value = mask_secret(str(value))
-                if value:
-                    value = f"{value} ({self.ui.translator.text('sensitive_masked')})"
-            elif isinstance(value, bool):
+            if option.field_name == "model":
+                value = self.config.active_ai_provider().model
+            else:
+                value = getattr(self.config, option.field_name)
+            if isinstance(value, bool):
                 value = self.ui.translator.text("yes" if value else "no")
-            elif option.field_name == "pull_strategy":
+            if option.field_name == "pull_strategy":
                 value = self.ui.translator.text(f"pull_strategy_{value}")
             rows.append((option.key, self.ui.translator.text(option.label_key), str(value)))
+        rows.append(("14", self.ui.translator.text("working_copy"), self._repository_header()))
         return rows
+
+    def _provider_summary(self, provider: AIProviderConfig) -> str:
+        """Return a masked one-line summary for a provider profile."""
+
+        token = mask_secret(provider.api_token)
+        if token:
+            token = f"{token} ({self.ui.translator.text('sensitive_masked')})"
+        return (
+            f"{provider.name} | {provider.provider_type} | "
+            f"{provider.model} | {provider.api_url} | {token}"
+        )
+
+    def _add_or_update_provider(self) -> None:
+        """Create or update a provider profile from settings."""
+
+        if self.config is None:
+            return
+
+        raw_name = self.ui.ask(
+            self.ui.translator.text("provider_name"),
+            default=self.config.active_provider,
+        )
+        try:
+            name = validate_provider_name(raw_name)
+        except ValueError as exc:
+            self.ui.error(self.ui.translator.text(str(exc)))
+            return
+
+        existing = self.config.providers.get(name)
+        defaults = provider_defaults(name)
+        provider_type = self._ask_validated(
+            self._prompt_with_hint("provider_type", "provider_type_hint"),
+            validate_provider_type,
+            default=existing.provider_type if existing else defaults["provider_type"],
+        )
+        api_token = self._ask_validated(
+            self.ui.translator.text("api_token"),
+            validate_api_token,
+            default=None,
+            password=True,
+        )
+        api_url = self._ask_validated(
+            self.ui.translator.text("api_url"),
+            validate_api_url,
+            default=existing.api_url if existing else defaults["api_url"],
+        )
+        model = self._ask_validated(
+            self.ui.translator.text("model_name"),
+            validate_model,
+            default=existing.model if existing else defaults["model"],
+        )
+        provider = AIProviderConfig(
+            name=name,
+            provider_type=str(provider_type),
+            api_token=str(api_token),
+            api_url=str(api_url),
+            model=str(model),
+        )
+        providers = dict(self.config.providers)
+        providers[name] = provider
+        self._save_config(
+            replace(
+                self.config,
+                providers=providers,
+                active_provider=name,
+            )
+        )
+        self.ui.success(self.ui.translator.text("provider_saved"))
+
+    def _switch_provider(self) -> None:
+        """Switch the active provider to one of the configured profiles."""
+
+        if self.config is None:
+            return
+        rows = []
+        for index, (name, provider) in enumerate(self.config.providers.items(), start=1):
+            marker = ""
+            if name == self.config.active_provider:
+                marker = self.ui.translator.text("active_marker")
+            rows.append((str(index), f"{provider.name} {marker}".strip()))
+        self.ui.table(self.ui.translator.text("configured_providers"), rows)
+        raw_choice = self.ui.ask(self.ui.translator.text("provider_switch_prompt"), default="1")
+        indexes = self._parse_indexes(raw_choice, len(rows))
+        if not indexes:
+            self.ui.warning(self.ui.translator.text("invalid_choice"))
+            return
+        selected_index = min(indexes)
+        selected_name = list(self.config.providers.keys())[selected_index - 1]
+        self._save_config(replace(self.config, active_provider=selected_name))
+        self.ui.success(self.ui.translator.text("provider_switched"))
+
+    def _save_active_provider(self, provider: AIProviderConfig) -> None:
+        """Persist changes to the active provider profile."""
+
+        if self.config is None:
+            return
+        providers = dict(self.config.providers)
+        providers[provider.name] = provider
+        self._save_config(replace(self.config, providers=providers))
+
+    def _change_working_copy(self) -> None:
+        """Change the active repository path after validation."""
+
+        raw_path = self.ui.ask(
+            self.ui.translator.text("repository_path_prompt"),
+            default=str(self._repository_path()),
+        )
+        try:
+            repo_path = validate_repository_path(raw_path)
+        except (ValueError, GitRepositoryError) as exc:
+            self.ui.error(self.ui.translator.text(str(exc)))
+            return
+        self.git = GitService(str(repo_path))
+        self.git.ensure_available()
+        try:
+            self.repository_store.save(repo_path)
+        except OSError:
+            self.ui.warning(self.ui.translator.text("repository_path_save_failed"))
+        self.ui.success(f"{self.ui.translator.text('repository_selected')}: {repo_path}")
 
     def _edit_setting(self, option: SettingsOption) -> None:
         """Prompt until a valid value is entered or the edit is cancelled."""
@@ -373,7 +552,11 @@ class CommitCraftApp:
         if self.config is None:
             return
 
-        current_value = getattr(self.config, option.field_name)
+        current_value = (
+            self.config.active_ai_provider().model
+            if option.field_name == "model"
+            else getattr(self.config, option.field_name)
+        )
         default = None if option.password else str(current_value)
         prompt = (
             f"{self.ui.translator.text('settings_enter_new')}: "
@@ -393,7 +576,12 @@ class CommitCraftApp:
                 continue
             if option.field_name == "ui_language":
                 new_value = self._ensure_language_available(str(new_value))
-            self._save_config(replace(self.config, **{option.field_name: new_value}))
+            if option.field_name == "model":
+                self._save_active_provider(
+                    replace(self.config.active_ai_provider(), model=str(new_value))
+                )
+            else:
+                self._save_config(replace(self.config, **{option.field_name: new_value}))
             self.ui.success(self.ui.translator.text("settings_update_done"))
             return
 
@@ -453,7 +641,7 @@ class CommitCraftApp:
                 diff = "\n".join(selected)
 
             self.ui.info(self.ui.translator.text("generating"))
-            ai_response = GapGPTClient(self.config).generate_commit_message(
+            ai_response = AIClient(self.config).generate_commit_message(
                 diff,
                 conventional=self.config.conventional_commits,
                 on_retry=self._show_ai_retry,
@@ -470,7 +658,7 @@ class CommitCraftApp:
         self.ui.success(self.ui.translator.text("commit_done"))
 
     def _review_commit_message(self, generated_message: str) -> str | None:
-        """Let the user inspect, edit, validate, and approve a commit message."""
+        """Let the user inspect, edit, and approve a commit message."""
 
         if self.config is None:
             return None
@@ -483,53 +671,46 @@ class CommitCraftApp:
             )
             if edited.strip():
                 message = normalize_commit_message(edited)
-            if self.config.conventional_commits:
-                validation = validate_conventional_commit(message)
-                if not validation.is_valid:
-                    self.ui.error(self.ui.translator.text("commit_message_invalid"))
-                    self.ui.panel(
-                        self.ui.translator.text("commit_message_validation_errors"),
-                        "\n".join(self.ui.translator.text(error) for error in validation.errors),
-                        style="red",
-                    )
-                    if self.ui.confirm(
-                        self.ui.translator.text("commit_message_edit_again"),
-                        default=True,
-                    ):
-                        continue
-                    return None
             if self.ui.confirm(self.ui.translator.text("confirm_commit"), default=True):
                 return message
             return None
 
-    def _commit_file_groups(self, selected: list[str]) -> list[list[str]]:
-        """Optionally split selected paths into independent commit groups."""
+    def _commit_file_groups(
+        self,
+        selected: list[str],
+    ) -> list[list[str]]:
+        """Use AI to optionally split selected paths into independent commit groups."""
 
-        if len(selected) <= 1 or not self.ui.confirm(
-            self.ui.translator.text("split_changes_prompt"),
-            default=False,
-        ):
+        if self.config is None or len(selected) <= 1 or not self.config.auto_split_commits:
             return [selected]
 
-        remaining = selected[:]
-        groups: list[list[str]] = []
-        while remaining:
-            self.ui.table(
-                self.ui.translator.text("split_remaining_files"),
-                [(str(index), path) for index, path in enumerate(remaining, start=1)],
+        diff = self.git.diff_for_files(selected)
+        if not diff.strip():
+            diff = "\n".join(selected)
+        self.ui.info(self.ui.translator.text("analyzing_splits"))
+        plan = AIClient(self.config).split_commit_groups(
+            selected,
+            diff,
+            on_retry=self._show_ai_retry,
+        )
+        if len(plan.groups) <= 1:
+            self.ui.info(self.ui.translator.text("split_single_group"))
+            return [selected]
+
+        rows = [
+            (
+                str(index),
+                f"{group.title}: {', '.join(group.files)}",
             )
-            self.ui.info(self.ui.translator.text("split_group_help"))
-            raw = self.ui.ask(self.ui.translator.text("split_group_prompt"), default="")
-            indexes = self._parse_indexes(raw, len(remaining)) if raw.strip() else set(
-                range(1, len(remaining) + 1)
-            )
-            group = [path for index, path in enumerate(remaining, start=1) if index in indexes]
-            if not group:
-                self.ui.warning(self.ui.translator.text("nothing_selected"))
-                continue
-            groups.append(group)
-            remaining = [path for path in remaining if path not in group]
-        return groups
+            for index, group in enumerate(plan.groups, start=1)
+        ]
+        self.ui.table(
+            f"{self.ui.translator.text('split_groups_identified')}: {len(plan.groups)}",
+            rows,
+        )
+        if not self.ui.confirm(self.ui.translator.text("split_confirm"), default=True):
+            return [selected]
+        return [group.files for group in plan.groups]
 
     def _select_files(self, changed_files: list[ChangedFile]) -> list[str]:
         """Show changed files and remove user-specified items from default selection."""
@@ -567,6 +748,20 @@ class CommitCraftApp:
             if 1 <= index <= max_index:
                 indexes.add(index)
         return indexes
+
+    def _repository_path(self) -> Path:
+        """Return the active repository root, falling back to the configured path."""
+
+        try:
+            return self.git.repository_path()
+        except GitError:
+            return Path(self.git.repo_path).resolve()
+
+    def _repository_header(self) -> str:
+        """Return a header with repository folder name and full path."""
+
+        repo_path = self._repository_path()
+        return f"{repo_path.name} | {repo_path}"
 
     def _handle_push(self) -> None:
         """Push current branch."""
@@ -739,6 +934,7 @@ class CommitCraftApp:
             "ai_empty_choices",
             "ai_missing_content",
             "ai_request_failed",
+            "ai_split_parse_failed",
         }:
             return self.ui.translator.text(message)
         if isinstance(exc, GitConflictError):

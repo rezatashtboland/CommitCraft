@@ -1,11 +1,11 @@
 # CommitCraft
 
 CommitCraft is an AI-powered Python CLI for Git repositories. It detects
-uncommitted changes, lets you choose what to commit, asks a GapGPT-compatible
-chat-completions API for a commit message, and runs Git operations from a
+uncommitted changes, lets you choose what to commit, asks the active configured
+AI provider for a commit message, and runs Git operations from a
 colorful terminal menu.
 
-Current version: **1.2.0**
+Current version: **1.3.0**
 
 ## English
 
@@ -16,12 +16,14 @@ Current version: **1.2.0**
 - Mandatory working-copy path prompt before startup, with validation against a real Git repository.
 - Persistent repository path history stored separately from the main settings file.
 - First-run configuration wizard stored at `~/.commitcraft/config.json`.
-- GapGPT/OpenAI-compatible chat-completions request for AI-generated commit messages.
+- Multiple AI provider profiles, including GapGPT, OpenAI, and Claude.
+- One active provider at a time, with per-provider token, base URL, and model settings.
 - Independent display language and commit-message language settings.
 - English and Persian display support, with English as the default language.
 - Persian RTL shaping installed only when Persian is selected.
-- Conventional Commits mode with validation before committing.
-- Optional split flow for committing unrelated selected files as separate commits.
+- Conventional Commits mode as an AI generation style preference.
+- Configurable AI-powered split flow for committing unrelated selected files as separate commits.
+- In-app working-copy switching with immediate Git repository validation.
 - Git fetch, pull, and sync retries for transient network failures.
 - Pull strategy setting for merge or rebase.
 - Optional auto-stash during pull and sync, including untracked files.
@@ -34,7 +36,7 @@ Current version: **1.2.0**
 
 - Python 3.10 or newer
 - Git installed and available in `PATH`
-- A GapGPT-compatible API token
+- An API token for at least one supported provider
 - Network access to the configured AI API URL
 - Optional Git remote/upstream configuration for push, fetch, pull, and sync
 
@@ -117,12 +119,11 @@ The default menu choice is `1`.
 1. Choose `Commit changes` or press Enter.
 2. Review the table of uncommitted files and Git status codes.
 3. Press Enter to keep all files selected, or enter comma-separated file numbers to remove.
-4. Optionally split the selected files into separate commit groups.
+4. If automatic commit splitting is enabled, review AI-identified logical commit groups.
 5. CommitCraft stages the selected files.
 6. CommitCraft sends the staged diff and staged file status to the AI.
 7. Review the generated message and edit it inline if needed.
-8. If Conventional Commits mode is enabled, CommitCraft validates the message.
-9. Confirm the final message to create the commit.
+8. Confirm the final message to create the commit.
 
 For deleted paths, CommitCraft stages with `git rm --ignore-unmatch` instead
 of `git add` to avoid pathspec errors.
@@ -179,23 +180,32 @@ Current default-backed config shape:
 
 ```json
 {
-  "api_token": "YOUR_TOKEN",
-  "api_url": "https://api.gapgpt.app/v1/chat/completions",
+  "providers": {
+    "GapGPT": {
+      "name": "GapGPT",
+      "provider_type": "openai",
+      "api_token": "YOUR_TOKEN",
+      "api_url": "https://api.gapgpt.app/v1/chat/completions",
+      "model": "gpt-4o-mini"
+    }
+  },
+  "active_provider": "GapGPT",
   "ui_language": "en",
   "model_output_language": "en",
   "retry_wait_seconds": 5,
   "retry_attempts": 10,
-  "model": "gpt-4o-mini",
   "conventional_commits": true,
   "pull_strategy": "merge",
-  "auto_stash": true
+  "auto_stash": true,
+  "auto_split_commits": false
 }
 ```
 
 On first run, CommitCraft asks for:
 
-- AI API token
-- AI API URL, defaulting to `https://api.gapgpt.app/v1/chat/completions`
+- GapGPT API token
+- GapGPT API URL, defaulting to `https://api.gapgpt.app/v1/chat/completions`
+- GapGPT model name
 - Display language, `English` or `Persian`
 - Commit message language, `English` or `Persian`
 - Retry wait seconds, default `5`
@@ -203,23 +213,27 @@ On first run, CommitCraft asks for:
 - Conventional Commits mode, default `yes`
 - Pull strategy, default `merge`
 - Auto-stash, default `yes`
+- Automatic commit splitting, default `no`
 
 The Settings menu can edit:
 
-- API token
-- AI API URL
-- Model name
+- Add or update AI provider profiles
+- Switch the active AI provider
+- Model name for the active provider
 - Display language
 - Commit message language
 - Retry wait seconds
 - Retry attempts
 - Conventional Commits mode
+- Automatic commit splitting
 - Pull strategy
 - Auto-stash
+- Working copy path
 
 Validation rules:
 
-- API token and model name cannot be empty.
+- Provider names, API tokens, and model names cannot be empty.
+- Provider type must be `openai` or `anthropic`.
 - API URL must be a valid HTTP or HTTPS URL.
 - Languages must be English or Persian.
 - Retry values must be positive integers.
@@ -227,25 +241,65 @@ Validation rules:
 - Pull strategy must be `merge` or `rebase`.
 - API token is masked in the settings table and is never printed in full.
 
+Legacy configs with top-level `api_token`, `api_url`, and `model` are migrated
+automatically into an active `GapGPT` provider profile when loaded.
+
+Provider examples:
+
+```json
+{
+  "OpenAI": {
+    "name": "OpenAI",
+    "provider_type": "openai",
+    "api_token": "OPENAI_TOKEN",
+    "api_url": "https://api.openai.com/v1/chat/completions",
+    "model": "gpt-4o-mini"
+  },
+  "Claude": {
+    "name": "Claude",
+    "provider_type": "anthropic",
+    "api_token": "ANTHROPIC_TOKEN",
+    "api_url": "https://api.anthropic.com/v1/messages",
+    "model": "claude-3-5-sonnet-latest"
+  }
+}
+```
+
+Choose `Settings`, then `Add or update AI provider` to create or update a
+provider profile. Choose `Active AI provider` to switch between configured
+providers. The settings table shows which provider is active.
+
+Choose `Settings`, then `Working copy` to change repositories while the app is
+running. The new path must exist, must be a directory, and must be inside a Git
+working tree. After validation, it becomes active immediately and is saved to
+the separate working-copy history file.
+
+When `Automatic commit splitting` is enabled, CommitCraft asks the active AI
+provider to group selected files into logical commits. The app shows how many
+groups were identified and asks before proceeding. Each group is staged and
+committed separately with its own generated message. When the setting is
+disabled, all selected files are committed together.
+
 The settings submenu also includes reset to defaults, cancel without saving,
 and back to main menu actions.
 
-### Commit Message Rules
+### Commit Message Style
 
-When Conventional Commits mode is enabled, the AI is prompted to return:
+When Conventional Commits mode is enabled, the AI is prompted to prefer:
 
 - A first line like `type(scope): description`, `type: description`, or a `!` breaking form.
 - One of these types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`,
   `test`, `build`, `ci`, `chore`, `revert`.
 - A short lowercase scope inferred from the staged diff when useful.
-- An imperative, present-tense description without a final period.
-- A first line under 72 characters.
-- Optional body or footer separated from the header by a blank line.
-- `BREAKING CHANGE:` footer when the header uses `!`.
+- An imperative, present-tense description when useful.
+- Optional body or footer when useful.
 - No Markdown code fences and no explanation outside the commit message.
 
 When Conventional Commits mode is disabled, the AI is prompted for one concise
 free-form commit message in the configured commit-message language.
+
+CommitCraft does not reject user-edited commit messages for length or format.
+After review, users can commit any message text accepted by Git.
 
 ### Usage Examples
 
@@ -280,7 +334,7 @@ Commit with this message? [yes]: yes
 کنید، از یک API سازگار با GapGPT برای پیام کامیت کمک می‌گیرد و عملیات Git را
 از یک منوی ترمینالی رنگی اجرا می‌کند.
 
-نسخه فعلی: **1.2.0**
+نسخه فعلی: **1.3.0**
 
 ### امکانات
 
@@ -289,12 +343,14 @@ Commit with this message? [yes]: yes
 - دریافت اجباری مسیر پوشه کاری پیش از شروع و اعتبارسنجی آن به‌عنوان مخزن Git.
 - ذخیره تاریخچه مسیر پوشه کاری جدا از فایل تنظیمات اصلی.
 - ساخت تنظیمات اجرای اول در `~/.commitcraft/config.json`.
-- تولید پیام کامیت با API سازگار با chat-completions.
+- پشتیبانی از چند ارائه‌دهنده هوش مصنوعی، شامل GapGPT، OpenAI و Claude.
+- فعال بودن تنها یک ارائه‌دهنده در هر لحظه، با توکن، نشانی و مدل جداگانه برای هرکدام.
 - جدایی زبان نمایش برنامه از زبان پیام کامیت.
 - پشتیبانی از نمایش انگلیسی و فارسی، با انگلیسی به‌عنوان پیش‌فرض.
 - نصب وابستگی‌های نمایش راست‌به‌چپ فارسی فقط هنگام انتخاب فارسی.
-- حالت Conventional Commits همراه با اعتبارسنجی پیش از commit.
-- امکان تقسیم فایل‌های انتخاب‌شده در چند commit جدا.
+- حالت Conventional Commits به‌عنوان ترجیح سبک تولید پیام توسط AI.
+- تقسیم خودکار تغییرات نامرتبط به چند commit منطقی با کمک هوش مصنوعی.
+- تغییر پوشه کاری از داخل تنظیمات با اعتبارسنجی فوری مخزن Git.
 - تلاش مجدد برای fetch، pull و sync فقط در خطاهای موقت شبکه.
 - تنظیم روش pull بین merge و rebase.
 - auto-stash اختیاری هنگام pull و sync، همراه با فایل‌های untracked.
@@ -306,7 +362,7 @@ Commit with this message? [yes]: yes
 
 - Python نسخه 3.10 یا جدیدتر
 - Git نصب‌شده و قابل دسترس در `PATH`
-- توکن API سازگار با GapGPT
+- توکن API برای حداقل یکی از ارائه‌دهنده‌های پشتیبانی‌شده
 - دسترسی شبکه به آدرس API تنظیم‌شده
 - تنظیم بودن remote/upstream برای عملیات push، fetch، pull و sync
 
@@ -366,12 +422,11 @@ commitcraft
 1. گزینه commit را انتخاب کنید یا Enter بزنید.
 2. فایل‌های تغییرکرده و وضعیت Git آن‌ها را ببینید.
 3. برای انتخاب همه فایل‌ها Enter بزنید یا شماره فایل‌های حذفی را با کاما وارد کنید.
-4. در صورت نیاز فایل‌های انتخاب‌شده را به چند گروه کامیت تقسیم کنید.
+4. اگر تقسیم خودکار کامیت فعال باشد، گروه‌های منطقی تشخیص‌داده‌شده توسط AI را بررسی کنید.
 5. برنامه فایل‌های انتخاب‌شده را stage می‌کند.
 6. diff آماده‌شده برای تولید پیام کامیت به AI فرستاده می‌شود.
 7. پیام تولیدشده را بررسی و در صورت نیاز ویرایش کنید.
-8. اگر Conventional Commits فعال باشد، پیام اعتبارسنجی می‌شود.
-9. پیام نهایی را تأیید کنید تا commit ساخته شود.
+8. پیام نهایی را تأیید کنید تا commit ساخته شود.
 
 ### عملیات Remote
 
@@ -416,27 +471,43 @@ commitcraft
 
 ```json
 {
-  "api_token": "YOUR_TOKEN",
-  "api_url": "https://api.gapgpt.app/v1/chat/completions",
+  "providers": {
+    "GapGPT": {
+      "name": "GapGPT",
+      "provider_type": "openai",
+      "api_token": "YOUR_TOKEN",
+      "api_url": "https://api.gapgpt.app/v1/chat/completions",
+      "model": "gpt-4o-mini"
+    }
+  },
+  "active_provider": "GapGPT",
   "ui_language": "en",
   "model_output_language": "en",
   "retry_wait_seconds": 5,
   "retry_attempts": 10,
-  "model": "gpt-4o-mini",
   "conventional_commits": true,
   "pull_strategy": "merge",
-  "auto_stash": true
+  "auto_stash": true,
+  "auto_split_commits": false
 }
 ```
 
-تنظیمات قابل ویرایش شامل توکن API، آدرس API، نام مدل، زبان نمایش، زبان پیام
-کامیت، زمان انتظار تلاش مجدد، تعداد تلاش مجدد، حالت Conventional Commits،
-روش pull و auto-stash است. توکن در جدول تنظیمات مخفی نمایش داده می‌شود.
+تنظیمات قابل ویرایش شامل افزودن یا به‌روزرسانی ارائه‌دهنده‌های AI، تغییر
+ارائه‌دهنده فعال، نام مدل ارائه‌دهنده فعال، زبان نمایش، زبان پیام کامیت، زمان
+انتظار تلاش مجدد، تعداد تلاش مجدد، حالت Conventional Commits، تقسیم خودکار
+کامیت‌ها، روش pull، auto-stash و پوشه کاری است. توکن در جدول تنظیمات مخفی
+نمایش داده می‌شود.
 
-### قالب پیام کامیت
+تنظیمات قدیمی با `api_token`، `api_url` و `model` به‌صورت خودکار به پروفایل
+فعال `GapGPT` مهاجرت می‌کنند. برای تغییر مخزن در زمان اجرا، از گزینه پوشه
+کاری در Settings استفاده کنید؛ مسیر جدید باید وجود داشته باشد و داخل مخزن Git
+باشد. اگر تقسیم خودکار کامیت‌ها فعال باشد، برنامه گروه‌های منطقی تشخیص‌داده‌شده
+را نمایش می‌دهد و پیش از ساخت چند کامیت جدا تأیید می‌گیرد.
 
-در حالت Conventional Commits، پیام باید با یکی از نوع‌های `feat`، `fix`،
-`docs`، `style`، `refactor`، `perf`، `test`، `build`، `ci`، `chore` یا
-`revert` شروع شود، خط اول حداکثر 72 نویسه باشد، توضیح حالت امری داشته باشد،
-با نقطه تمام نشود و در صورت استفاده از `!` دارای footer با
-`BREAKING CHANGE:` باشد.
+### سبک پیام کامیت
+
+در حالت Conventional Commits، از AI خواسته می‌شود پیام را ترجیحاً با یکی از
+نوع‌های `feat`، `fix`، `docs`، `style`، `refactor`، `perf`، `test`، `build`،
+`ci`، `chore` یا `revert` تولید کند. این فقط ترجیح تولید پیام است و برنامه
+پیام ویرایش‌شده کاربر را به‌خاطر طول یا قالب رد نمی‌کند. پس از بررسی، هر پیام
+قابل قبول برای Git می‌تواند commit شود.

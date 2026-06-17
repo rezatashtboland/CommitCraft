@@ -1,7 +1,7 @@
 [project]
 name = "commitcraft"
-version = "1.2.0"
-description = "AI-powered Git commit assistant using a GapGPT-compatible API"
+version = "1.3.0"
+description = "AI-powered Git commit assistant with configurable AI providers"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

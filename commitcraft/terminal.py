@@ -68,22 +68,26 @@ class TerminalUI:
 
         return self.display(self.translator.text(key))
 
-    def banner(self) -> None:
+    def banner(self, repository: str | None = None) -> None:
         """Render application banner."""
 
         title = Text(self.display(self.translator.text("app_title")), style="bold cyan")
         subtitle = self.display(self.translator.text("subtitle"))
+        body = Text.assemble(title, "\n", Text(subtitle, style="magenta"))
+        if repository:
+            body.append("\n")
+            body.append(Text(self.display(repository), style="white"))
         panel = Panel(
-            Align.center(Text.assemble(title, "\n", Text(subtitle, style="magenta"))),
+            Align.center(body),
             border_style="bright_blue",
             padding=(1, 4),
         )
         self.console.print(panel)
 
-    def menu(self) -> str:
+    def menu(self, repository: str | None = None) -> str:
         """Render main menu and return selected option."""
 
-        self.banner()
+        self.banner(repository)
         table = Table(show_header=False, border_style="bright_magenta", box=None)
         table.add_column("key", style="bold yellow", justify="center")
         table.add_column("label", style="bold white")
@@ -178,8 +182,8 @@ class TerminalUI:
         table.add_column(self.t("settings_value_column"), style="white")
         for key, label, value in rows:
             table.add_row(key, self.display(label), self.display(value))
-        table.add_row("11", self.t("settings_reset"), "")
-        table.add_row("12", self.t("settings_cancel"), "")
+        table.add_row("12", self.t("settings_reset"), "")
+        table.add_row("13", self.t("settings_cancel"), "")
         table.add_row("0", self.t("settings_back"), "")
         self.console.print(Panel(table, border_style="green"))
         return Prompt.ask(

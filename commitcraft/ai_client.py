@@ -1,4 +1,4 @@
-"""GapGPT-compatible ChatGPT-like API client."""
+"""AI provider clients for commit messages and split planning."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import Any
 
 import requests
 
-from .config import AppConfig
+from .config import AIProviderConfig, AppConfig
 
 
 class AIClientError(RuntimeError):
@@ -24,11 +24,28 @@ class AIResponse:
     raw: str
 
 
-class GapGPTClient:
-    """Client for gapgpt API endpoints compatible with OpenAI chat completions."""
+@dataclass(frozen=True)
+class CommitSplit:
+    """One AI-proposed logical commit group."""
+
+    title: str
+    files: list[str]
+
+
+@dataclass(frozen=True)
+class CommitSplitPlan:
+    """AI-generated commit split plan."""
+
+    groups: list[CommitSplit]
+    raw: str
+
+
+class AIClient:
+    """Client for OpenAI-compatible and Anthropic message endpoints."""
 
     def __init__(self, config: AppConfig) -> None:
         self.config = config
+        self.provider = config.active_ai_provider()
 
     def generate_commit_message(
         self,
@@ -39,40 +56,61 @@ class GapGPTClient:
         """Generate a commit message from Git diff with retry logic."""
 
         prompt = self._build_prompt(diff, conventional)
-        payload = {
-            "model": self.config.model,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": (
-                        "You are an expert software engineer who writes concise, "
-                        "accurate Git commit messages."
-                    ),
-                },
-                {"role": "user", "content": prompt},
-            ],
-            "temperature": 0.2,
-        }
+        content = self._request_text(
+            prompt,
+            system=(
+                "You are an expert software engineer who writes concise, "
+                "accurate Git commit messages."
+            ),
+            on_retry=on_retry,
+        )
+        message = self._sanitize_commit_message(content)
+        if not message:
+            raise AIClientError("ai_empty_message")
+        return AIResponse(message=message, raw=content)
+
+    def split_commit_groups(
+        self,
+        files: list[str],
+        diff: str,
+        on_retry: Callable[[int, int, Exception], None] | None = None,
+    ) -> CommitSplitPlan:
+        """Ask AI to split selected files into logical commit groups."""
+
+        prompt = self._build_split_prompt(files, diff)
+        content = self._request_text(
+            prompt,
+            system=(
+                "You are an expert software engineer who groups Git changes into "
+                "small, reviewable logical commits."
+            ),
+            on_retry=on_retry,
+        )
+        return CommitSplitPlan(groups=self._parse_split_groups(content, files), raw=content)
+
+    def _request_text(
+        self,
+        prompt: str,
+        *,
+        system: str,
+        on_retry: Callable[[int, int, Exception], None] | None = None,
+    ) -> str:
+        """Run the active provider request and return assistant text."""
 
         last_error: Exception | None = None
         for attempt in range(1, self.config.retry_attempts + 1):
             try:
-                # GapGPT exposes an OpenAI-compatible chat-completions endpoint.
                 response = requests.post(
-                    self.config.api_url,
-                    headers={
-                        "Authorization": f"Bearer {self.config.api_token}",
-                        "Content-Type": "application/json",
-                    },
-                    json=payload,
+                    self.provider.api_url,
+                    headers=self._headers(self.provider),
+                    json=self._payload(self.provider, prompt, system),
                     timeout=60,
                 )
                 response.raise_for_status()
                 data = response.json()
-                content = self._extract_content(data)
-                message = self._sanitize_commit_message(content)
-                if message:
-                    return AIResponse(message=message, raw=content)
+                content = self._extract_content(data, self.provider)
+                if content.strip():
+                    return content.strip()
                 raise AIClientError("ai_empty_message")
             except (requests.RequestException, ValueError, KeyError, AIClientError) as exc:
                 last_error = exc
@@ -84,6 +122,40 @@ class GapGPTClient:
         if isinstance(last_error, AIClientError):
             raise AIClientError(str(last_error)) from last_error
         raise AIClientError("ai_request_failed") from last_error
+
+    def _headers(self, provider: AIProviderConfig) -> dict[str, str]:
+        """Build provider-specific request headers without exposing secrets."""
+
+        if provider.provider_type == "anthropic":
+            return {
+                "x-api-key": provider.api_token,
+                "anthropic-version": "2023-06-01",
+                "Content-Type": "application/json",
+            }
+        return {
+            "Authorization": f"Bearer {provider.api_token}",
+            "Content-Type": "application/json",
+        }
+
+    def _payload(self, provider: AIProviderConfig, prompt: str, system: str) -> dict[str, Any]:
+        """Build a provider-specific JSON payload."""
+
+        if provider.provider_type == "anthropic":
+            return {
+                "model": provider.model,
+                "system": system,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 1200,
+                "temperature": 0.2,
+            }
+        return {
+            "model": provider.model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.2,
+        }
 
     def _build_prompt(self, diff: str, conventional: bool) -> str:
         """Create model prompt while keeping output language configurable."""
@@ -98,7 +170,6 @@ Output language: {language}
 Rules:
 - No Markdown code fences.
 - No explanations outside the commit message.
-- Keep the first line under 72 characters when possible.
 - Use an optional body only when it clarifies important details.
 
 Git changes:
@@ -115,9 +186,8 @@ Commit message structure:
 - Allowed types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert.
 - Infer the most accurate type and a short lowercase scope from the staged diff.
 - Use an imperative, present-tense description with no final period.
-- Keep the first line under 72 characters.
 - Add a blank line before any body or footer.
-- Optional body: 1-3 short lines only when useful.
+- Optional body: 1-5 short lines only when useful.
 - For breaking changes, add ! in the header and include a BREAKING CHANGE: footer.
 - No Markdown code fences.
 - No explanations outside the commit message.
@@ -126,8 +196,52 @@ Git changes:
 {diff[:30000]}
 """.strip()
 
-    def _extract_content(self, data: dict[str, Any]) -> str:
-        """Extract assistant message from ChatGPT-like response."""
+    def _build_split_prompt(self, files: list[str], diff: str) -> str:
+        """Create model prompt for logical commit grouping."""
+
+        file_list = "\n".join(f"- {path}" for path in files)
+        return f"""
+Analyze these selected Git changes and split them into logical commits only when the
+changes are unrelated by feature, concern, or context.
+
+Return strict JSON only, with this shape:
+{{
+  "groups": [
+    {{"title": "short reason", "files": ["path/from/list"]}}
+  ]
+}}
+
+Rules:
+- Every file must appear exactly once.
+- Use only paths from the selected file list.
+- Keep related changes together.
+- Return one group when the changes belong in one commit.
+- No Markdown code fences.
+- No explanations outside JSON.
+
+Selected files:
+{file_list}
+
+Git changes:
+{diff[:30000]}
+""".strip()
+
+    def _extract_content(self, data: dict[str, Any], provider: AIProviderConfig) -> str:
+        """Extract assistant message from a provider response."""
+
+        if provider.provider_type == "anthropic":
+            content_blocks = data.get("content")
+            if not isinstance(content_blocks, list):
+                raise AIClientError("ai_missing_content")
+            text_parts = [
+                block.get("text", "")
+                for block in content_blocks
+                if isinstance(block, dict) and block.get("type") == "text"
+            ]
+            content = "\n".join(part for part in text_parts if part)
+            if not content:
+                raise AIClientError("ai_missing_content")
+            return content.strip()
 
         choices = data["choices"]
         if not choices:
@@ -150,3 +264,47 @@ Git changes:
         if cleaned.startswith("```"):
             cleaned = cleaned.strip("`").strip()
         return cleaned
+
+    def _parse_split_groups(self, content: str, files: list[str]) -> list[CommitSplit]:
+        """Parse and validate model-proposed split groups."""
+
+        cleaned = content.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.strip("`").strip()
+            if cleaned.lower().startswith("json"):
+                cleaned = cleaned[4:].strip()
+        try:
+            parsed = __import__("json").loads(cleaned)
+        except ValueError as exc:
+            raise AIClientError("ai_split_parse_failed") from exc
+
+        raw_groups = parsed.get("groups") if isinstance(parsed, dict) else None
+        if not isinstance(raw_groups, list):
+            raise AIClientError("ai_split_parse_failed")
+
+        allowed = set(files)
+        seen: set[str] = set()
+        groups: list[CommitSplit] = []
+        for index, raw_group in enumerate(raw_groups, start=1):
+            if not isinstance(raw_group, dict):
+                raise AIClientError("ai_split_parse_failed")
+            raw_files = raw_group.get("files")
+            if not isinstance(raw_files, list):
+                raise AIClientError("ai_split_parse_failed")
+            group_files = []
+            for raw_path in raw_files:
+                path = str(raw_path)
+                if path not in allowed or path in seen:
+                    raise AIClientError("ai_split_parse_failed")
+                group_files.append(path)
+                seen.add(path)
+            if group_files:
+                title = str(raw_group.get("title") or f"Commit {index}").strip()
+                groups.append(CommitSplit(title=title, files=group_files))
+
+        if seen != allowed or not groups:
+            raise AIClientError("ai_split_parse_failed")
+        return groups
+
+
+GapGPTClient = AIClient
