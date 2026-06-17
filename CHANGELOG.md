@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+
+## [1.3.0] - 2026-06-17
+### Added
+- اضافه کردن پشتیبانی از چند ارائه‌دهنده AI و تقسیم خودکار کامیت‌ها (`06d8b5e`) <!-- commitcraft:entry=06d8b5e7d9189849c193cd87a8d0e4c4210c2086 -->
+
+### Documentation
+- اضافه کردن فایل CHANGELOG.md (`21a93b1`) <!-- commitcraft:entry=21a93b12619d0d49325437377676a1d643e01805 -->
+
 ## [1.2.0] - 2026-06-16
 ### Added
 - اضافه کردن دستیار کامیت هوش مصنوعی CommitCraft (`9a956ca`) <!-- commitcraft:entry=9a956ca386fb058059022cbb450b1fc815e309af -->
@@ -24,4 +32,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - افزودن AGENTS.md با دستورالعمل‌های هوش مصنوعی (`76c9ebd`) <!-- commitcraft:entry=76c9ebd47c038d90aebbe818e30f96549ca735d1 -->
 - به‌روزرسانی مستندات README و AGENTS (`c54e6d0`) <!-- commitcraft:entry=c54e6d0b29fe052419e4aef7f837e027714939c6 -->
 
-<!-- commitcraft:last-commit=0bb824f88abbdc1e9be79202632f6a12213936f1 -->
+<!-- commitcraft:last-commit=06d8b5e7d9189849c193cd87a8d0e4c4210c2086 -->
