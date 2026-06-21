@@ -9,10 +9,34 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .subprocess_utils import run_capture
+from .logging_config import get_logger
 
 
 class GitError(RuntimeError):
     """Raised when a Git command fails."""
+
+    def __init__(
+        self,
+        message: str = "git_command_failed",
+        *,
+        command: list[str] | None = None,
+        exit_code: int | None = None,
+        stdout: str = "",
+        stderr: str = "",
+        reason_key: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.command = command or []
+        self.exit_code = exit_code
+        self.stdout = stdout
+        self.stderr = stderr
+        self.reason_key = reason_key
+
+    @property
+    def output(self) -> str:
+        """Return captured Git output for diagnostics."""
+
+        return "\n".join(part for part in (self.stdout.strip(), self.stderr.strip()) if part)
 
 
 class GitConflictError(GitError):
@@ -67,6 +91,7 @@ class GitService:
 
     def __init__(self, repo_path: str = ".") -> None:
         self.repo_path = repo_path
+        self.logger = get_logger()
 
     def ensure_available(self) -> None:
         """Ensure Git is installed and current directory is a repository."""
@@ -74,10 +99,12 @@ class GitService:
         try:
             self._run(["git", "--version"])
         except FileNotFoundError as exc:
+            self.logger.exception("Git executable was not found")
             raise GitError("git_missing") from exc
 
         result = self._run(["git", "rev-parse", "--is-inside-work-tree"], check=False)
         if result.returncode != 0 or result.stdout.strip() != "true":
+            self.logger.error("Path is not a Git repository: %s", self.repo_path)
             raise GitError("git_not_repo")
 
     def repository_path(self) -> Path:
@@ -132,6 +159,7 @@ class GitService:
 
         if not files:
             return
+        self.logger.info("Staging %s selected file(s)", len(files))
         deleted_files, other_files = self._split_deleted_files(files)
         if other_files:
             self._run(["git", "add", "--", *other_files], check=True)
@@ -150,12 +178,29 @@ class GitService:
         command = ["git", "commit", "-F", "-"]
         if files:
             command.extend(["--only", "--", *files])
+        self.logger.info("Creating commit for %s file(s)", len(files or []))
         self._run(command, input_text=message, check=True)
 
-    def push(self) -> None:
-        """Push current branch to its configured upstream."""
+    def push(
+        self,
+        *,
+        attempts: int = 1,
+        wait_seconds: int = 1,
+        on_retry: Callable[[int, int, GitError], None] | None = None,
+    ) -> GitOperationResult:
+        """Push current branch, setting upstream automatically when missing."""
 
-        self._run(["git", "push"], check=True)
+        command = ["git", "push"]
+        if not self.has_upstream():
+            branch = self.current_branch()
+            command = ["git", "push", "--set-upstream", "origin", branch]
+            self.logger.info("Current branch has no upstream; using push with upstream setup")
+        return self._run_retryable(
+            command,
+            attempts=attempts,
+            wait_seconds=wait_seconds,
+            on_retry=on_retry,
+        )
 
     def fetch(
         self,
@@ -211,8 +256,7 @@ class GitService:
             wait_seconds=wait_seconds,
             on_retry=on_retry,
         )
-        push_result = self._run_retryable(
-            ["git", "push"],
+        push_result = self.push(
             attempts=attempts,
             wait_seconds=wait_seconds,
             on_retry=on_retry,
@@ -392,13 +436,27 @@ class GitService:
 
         output = "\n".join(part for part in (result.stdout, result.stderr) if part).strip()
         lowered = output.lower()
+        kwargs = {
+            "command": list(result.args) if isinstance(result.args, list) else [str(result.args)],
+            "exit_code": result.returncode,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        }
         if self._has_unmerged_paths(output) or self.in_merge() or self.in_rebase():
-            return GitConflictError(output or "git_conflict")
+            return GitConflictError(output or "git_conflict", reason_key="git_conflict", **kwargs)
         if any(pattern in lowered for pattern in _AUTH_ERROR_PATTERNS):
-            return GitAuthError(output or "git_auth_failed")
+            return GitAuthError(output or "git_auth_failed", reason_key="git_auth_failed", **kwargs)
+        if any(pattern in lowered for pattern in _NO_UPSTREAM_ERROR_PATTERNS):
+            return GitRepositoryStateError(
+                output or "git_no_upstream",
+                reason_key="git_no_upstream",
+                **kwargs,
+            )
+        if any(pattern in lowered for pattern in _NON_FAST_FORWARD_PATTERNS):
+            return GitError(output or "git_non_fast_forward", reason_key="git_non_fast_forward", **kwargs)
         if any(pattern in lowered for pattern in _TRANSIENT_ERROR_PATTERNS):
-            return GitTransientError(output or "git_transient_failure")
-        return GitError(output or "git_command_failed")
+            return GitTransientError(output or "git_transient_failure", **kwargs)
+        return GitError(output or "git_command_failed", **kwargs)
 
     def _has_unmerged_paths(self, output: str) -> bool:
         """Return whether Git output or status indicates unresolved conflicts."""
@@ -473,10 +531,23 @@ class GitService:
         """Run a Git command and raise a friendly error on failure."""
 
         result = run_capture(command, cwd=self.repo_path, input=input_text)
+        self.logger.debug("Running Git command: %s", _format_command(command))
+        self.logger.debug(
+            "Git command finished: command=%s exit_code=%s stdout=%r stderr=%r",
+            _format_command(command),
+            result.returncode,
+            result.stdout,
+            result.stderr,
+        )
         if check and result.returncode != 0:
-            message = result.stderr.strip() or result.stdout.strip() or "Git command failed."
-            raise GitError(message)
+            raise self._classify_failed_result(result)
         return result
+
+
+def _format_command(command: list[str]) -> str:
+    """Return a readable command string for logs and diagnostics."""
+
+    return " ".join(command)
 
 
 _AUTH_ERROR_PATTERNS = (
@@ -488,6 +559,21 @@ _AUTH_ERROR_PATTERNS = (
     "403",
     "401",
     "repository not found",
+)
+
+_NO_UPSTREAM_ERROR_PATTERNS = (
+    "has no upstream branch",
+    "no upstream branch",
+    "no configured push destination",
+    "fatal: no configured push destination",
+)
+
+_NON_FAST_FORWARD_PATTERNS = (
+    "non-fast-forward",
+    "fetch first",
+    "rejected",
+    "failed to push some refs",
+    "updates were rejected",
 )
 
 _TRANSIENT_ERROR_PATTERNS = (

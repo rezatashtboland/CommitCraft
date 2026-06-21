@@ -10,6 +10,7 @@ from typing import Any
 import requests
 
 from .config import AIProviderConfig, AppConfig
+from .logging_config import get_logger
 
 
 class AIClientError(RuntimeError):
@@ -46,6 +47,7 @@ class AIClient:
     def __init__(self, config: AppConfig) -> None:
         self.config = config
         self.provider = config.active_ai_provider()
+        self.logger = get_logger()
 
     def generate_commit_message(
         self,
@@ -56,6 +58,7 @@ class AIClient:
         """Generate a commit message from Git diff with retry logic."""
 
         prompt = self._build_prompt(diff, conventional)
+        self.logger.info("Generating commit message with provider %s", self.provider.name)
         content = self._request_text(
             prompt,
             system=(
@@ -78,6 +81,7 @@ class AIClient:
         """Ask AI to split selected files into logical commit groups."""
 
         prompt = self._build_split_prompt(files, diff)
+        self.logger.info("Requesting commit split plan for %s file(s)", len(files))
         content = self._request_text(
             prompt,
             system=(
@@ -100,6 +104,12 @@ class AIClient:
         last_error: Exception | None = None
         for attempt in range(1, self.config.retry_attempts + 1):
             try:
+                self.logger.debug(
+                    "AI request attempt %s/%s to %s",
+                    attempt,
+                    self.config.retry_attempts,
+                    self.provider.api_url,
+                )
                 response = requests.post(
                     self.provider.api_url,
                     headers=self._headers(self.provider),
@@ -115,12 +125,20 @@ class AIClient:
             except (requests.RequestException, ValueError, KeyError, AIClientError) as exc:
                 last_error = exc
                 if attempt < self.config.retry_attempts:
+                    self.logger.warning(
+                        "AI request attempt %s/%s failed: %s",
+                        attempt,
+                        self.config.retry_attempts,
+                        exc,
+                    )
                     if on_retry is not None:
                         on_retry(attempt, self.config.retry_attempts, exc)
                     time.sleep(self.config.retry_wait_seconds)
 
         if isinstance(last_error, AIClientError):
+            self.logger.error("AI request failed with known error: %s", last_error)
             raise AIClientError(str(last_error)) from last_error
+        self.logger.error("AI request failed after retries: %s", last_error)
         raise AIClientError("ai_request_failed") from last_error
 
     def _headers(self, provider: AIProviderConfig) -> dict[str, str]:

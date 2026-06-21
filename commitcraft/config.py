@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -24,7 +25,9 @@ DEFAULT_CONVENTIONAL_COMMITS = True
 DEFAULT_PULL_STRATEGY = "merge"
 DEFAULT_AUTO_STASH = True
 DEFAULT_AUTO_SPLIT_COMMITS = False
+DEFAULT_LOG_LEVEL = "INFO"
 PULL_STRATEGIES = {"merge", "rebase"}
+LOG_LEVELS = {"INFO", "ERROR", "DEBUG"}
 AI_PROVIDER_TYPES = {"openai", "anthropic"}
 PROVIDER_DEFAULTS = {
     "gapgpt": {
@@ -94,6 +97,7 @@ class AppConfig:
     pull_strategy: str = DEFAULT_PULL_STRATEGY
     auto_stash: bool = DEFAULT_AUTO_STASH
     auto_split_commits: bool = DEFAULT_AUTO_SPLIT_COMMITS
+    log_level: str = DEFAULT_LOG_LEVEL
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AppConfig":
@@ -130,6 +134,7 @@ class AppConfig:
                 data.get("auto_split_commits"),
                 DEFAULT_AUTO_SPLIT_COMMITS,
             ),
+            log_level=validate_log_level(str(data.get("log_level") or DEFAULT_LOG_LEVEL)),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -148,6 +153,7 @@ class AppConfig:
             "pull_strategy": self.pull_strategy,
             "auto_stash": self.auto_stash,
             "auto_split_commits": self.auto_split_commits,
+            "log_level": self.log_level,
         }
 
     def active_ai_provider(self) -> AIProviderConfig:
@@ -175,6 +181,7 @@ class ConfigManager:
     def load(self) -> AppConfig:
         """Load config from disk."""
 
+        logging.getLogger("commitcraft").info("Loading config from %s", self.config_file)
         with self.config_file.open("r", encoding="utf-8") as file:
             data = json.load(file)
         return AppConfig.from_dict(data)
@@ -185,6 +192,7 @@ class ConfigManager:
         self.config_file.parent.mkdir(parents=True, exist_ok=True)
         with self.config_file.open("w", encoding="utf-8") as file:
             json.dump(config.to_dict(), file, ensure_ascii=False, indent=2)
+        logging.getLogger("commitcraft").info("Saved config to %s", self.config_file)
 
 
 def default_config() -> AppConfig:
@@ -326,6 +334,15 @@ def validate_pull_strategy(value: str) -> str:
     if normalized in PULL_STRATEGIES:
         return normalized
     raise ValueError("invalid_pull_strategy")
+
+
+def validate_log_level(value: str) -> str:
+    """Validate and normalize the persisted logging verbosity."""
+
+    normalized = value.strip().upper()
+    if normalized in LOG_LEVELS:
+        return normalized
+    raise ValueError("invalid_log_level")
 
 
 def _positive_int(value: Any, default: int) -> int:

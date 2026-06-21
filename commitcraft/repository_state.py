@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 
@@ -55,15 +56,20 @@ def normalize_repository_path(value: str) -> Path:
 def validate_repository_path(raw_path: str) -> Path:
     """Validate a mandatory working-copy path."""
 
+    logger = logging.getLogger("commitcraft")
     if not raw_path.strip().strip('"').strip("'"):
+        logger.error("Repository path validation failed: empty path")
         raise ValueError("value_required")
     repo_path = normalize_repository_path(raw_path)
     if not repo_path.exists():
+        logger.error("Repository path validation failed: path not found: %s", repo_path)
         raise ValueError("path_not_found")
     if not repo_path.is_dir():
+        logger.error("Repository path validation failed: not a directory: %s", repo_path)
         raise ValueError("path_not_directory")
     resolved_path = repo_path.resolve()
     _ensure_git_repository(resolved_path)
+    logger.info("Repository path validated: %s", resolved_path)
     return resolved_path
 
 

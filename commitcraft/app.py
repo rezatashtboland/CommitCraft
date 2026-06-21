@@ -25,6 +25,7 @@ from .config import (
     validate_api_url,
     validate_bool,
     validate_language,
+    validate_log_level,
     validate_model,
     validate_pull_strategy,
     validate_positive_int,
@@ -43,6 +44,7 @@ from .git_service import (
     GitService,
 )
 from .i18n import DEFAULT_LANGUAGE, Translator
+from .logging_config import get_logger, setup_logging
 from .repository_state import (
     GitRepositoryError,
     RepositoryPathStore,
@@ -122,6 +124,13 @@ SETTINGS_OPTIONS = (
         validate_bool,
         hint_key="bool_options_hint",
     ),
+    SettingsOption(
+        "12",
+        "log_level",
+        "log_level",
+        validate_log_level,
+        hint_key="log_level_hint",
+    ),
 )
 
 
@@ -135,11 +144,13 @@ class CommitCraftApp:
         self.ui = TerminalUI(self.translator)
         self.git = GitService(repo_path)
         self.config: AppConfig | None = None
+        self.logger = get_logger()
 
     def run(self) -> None:
         """Run the menu loop until user exits."""
 
         try:
+            self.logger.info("Application startup")
             self._bootstrap()
             while True:
                 choice = self.ui.menu(self._repository_header())
@@ -164,14 +175,17 @@ class CommitCraftApp:
                     self.ui.warning(self.ui.translator.text("invalid_choice"))
                 self.ui.pause()
         except KeyboardInterrupt:
+            self.logger.info("Application interrupted by user")
             self.ui.warning(self.ui.translator.text("ctrl_c"))
         except Exception as exc:  # pragma: no cover - final safety net.
+            self.logger.exception("Unhandled application error")
             self.ui.error(f"{self.ui.translator.text('error')}: {exc}")
 
     def _bootstrap(self) -> None:
         """Prepare dependencies, config, and Git prerequisites."""
 
         if not self.config_manager.exists():
+            self.logger.info("Config file not found; creating first-run config")
             self.ui.info(self.ui.translator.text("dependency_check"))
             self._ensure_dependencies()
             self.ui.warning(self.ui.translator.text("config_missing"))
@@ -179,10 +193,16 @@ class CommitCraftApp:
             self.config_manager.save(self.config)
             self.ui.success(self.ui.translator.text("config_saved"))
         else:
+            self.logger.info("Loading existing config")
             self.config = self.config_manager.load()
 
+        log_path = setup_logging(self.config.log_level)
+        self.logger = get_logger()
+        self.git.logger = self.logger
+        self.logger.info("CommitCraft %s started; log file: %s", __version__, log_path)
         self._apply_config_language()
         self.git.ensure_available()
+        self.logger.info("Git repository validated: %s", self._repository_path())
 
     def _ensure_dependencies(self) -> None:
         """Install missing dependencies on first run."""
@@ -287,6 +307,7 @@ class CommitCraftApp:
                 "pull_strategy": pull_strategy,
                 "auto_stash": auto_stash,
                 "auto_split_commits": auto_split_commits,
+                "log_level": "INFO",
             }
         )
 
@@ -354,11 +375,16 @@ class CommitCraftApp:
             choice = self.ui.settings_menu(self._settings_rows())
             if choice == "0":
                 return
-            if choice == "13":
-                self.ui.info(self.ui.translator.text("settings_cancel_done"))
-                continue
             if choice == "12":
+                option = options.get(choice)
+                if option is not None:
+                    self._edit_setting(option)
+                continue
+            if choice == "13":
                 self._reset_settings()
+                continue
+            if choice == "14":
+                self.ui.info(self.ui.translator.text("settings_cancel_done"))
                 continue
             if choice == "1":
                 self._add_or_update_provider()
@@ -366,7 +392,7 @@ class CommitCraftApp:
             if choice == "2":
                 self._switch_provider()
                 continue
-            if choice == "14":
+            if choice == "15":
                 self._change_working_copy()
                 continue
             option = options.get(choice)
@@ -448,7 +474,7 @@ class CommitCraftApp:
             if option.field_name == "pull_strategy":
                 value = self.ui.translator.text(f"pull_strategy_{value}")
             rows.append((option.key, self.ui.translator.text(option.label_key), str(value)))
-        rows.append(("14", self.ui.translator.text("working_copy"), self._repository_header()))
+        rows.append(("15", self.ui.translator.text("working_copy"), self._repository_header()))
         return rows
 
     def _provider_summary(self, provider: AIProviderConfig) -> str:
@@ -563,7 +589,9 @@ class CommitCraftApp:
             self.ui.error(self.ui.translator.text(str(exc)))
             return
         self.git = GitService(str(repo_path))
+        self.git.logger = self.logger
         self.git.ensure_available()
+        self.logger.info("Working copy changed to %s", repo_path)
         try:
             self.repository_store.save(repo_path)
         except OSError:
@@ -634,6 +662,10 @@ class CommitCraftApp:
 
         self.config = config
         self.config_manager.save(config)
+        setup_logging(config.log_level)
+        self.logger = get_logger()
+        self.git.logger = self.logger
+        self.logger.info("Config saved")
         self._apply_config_language()
 
     def _handle_commit(self) -> None:
@@ -643,7 +675,9 @@ class CommitCraftApp:
             return
 
         try:
+            self.logger.info("Starting commit flow")
             changed_files = self.git.changed_files()
+            self.logger.info("Detected %s changed file(s)", len(changed_files))
             if not changed_files:
                 self.ui.warning(self.ui.translator.text("no_changes"))
                 return
@@ -656,6 +690,7 @@ class CommitCraftApp:
             for commit_files in self._commit_file_groups(selected):
                 self._commit_selected_files(commit_files)
         except (GitError, AIClientError) as exc:
+            self.logger.exception("Commit flow failed")
             self.ui.error(self._friendly_error(exc))
 
     def _commit_selected_files(self, selected: list[str]) -> None:
@@ -663,6 +698,7 @@ class CommitCraftApp:
 
         if self.config is None:
             return
+        self.logger.info("Preparing commit for selected files: %s", selected)
         self.git.add(selected)
         try:
             diff = self.git.staged_diff_for_files(selected)
@@ -670,6 +706,7 @@ class CommitCraftApp:
                 diff = "\n".join(selected)
 
             self.ui.info(self.ui.translator.text("generating"))
+            self.logger.info("Requesting AI commit message")
             ai_response = AIClient(self.config).generate_commit_message(
                 diff,
                 conventional=self.config.conventional_commits,
@@ -684,6 +721,7 @@ class CommitCraftApp:
         self.ui.info(self.ui.translator.text("committing"))
         self.git.add(selected)
         self.git.commit(message, selected)
+        self.logger.info("Commit completed")
         self.ui.success(self.ui.translator.text("commit_done"))
 
     def _review_commit_message(self, generated_message: str) -> str | None:
@@ -795,16 +833,29 @@ class CommitCraftApp:
     def _handle_push(self) -> None:
         """Push current branch."""
 
+        if self.config is None:
+            return
         try:
             branch = self.git.current_branch()
             self.ui.info(f"{self.ui.translator.text('current_branch')}: {branch}")
             if not self.ui.confirm(self.ui.translator.text("push_confirm"), default=True):
+                self.logger.info("Push cancelled by user")
                 return
+            if not self.git.has_upstream():
+                self.ui.info(self.ui.translator.text("push_no_upstream"))
             self.ui.info(self.ui.translator.text("pushing"))
-            self.git.push()
+            result = self.git.push(
+                attempts=self.config.retry_attempts,
+                wait_seconds=self.config.retry_wait_seconds,
+                on_retry=self._show_git_retry,
+            )
+            self._show_git_output(result.output)
+            self.logger.info("Push completed")
             self.ui.success(self.ui.translator.text("push_done"))
         except GitError as exc:
+            self.logger.exception("Push failed")
             self.ui.error(self._friendly_error(exc))
+            self._show_git_error_details(exc)
 
     def _handle_fetch(self) -> None:
         """Fetch current repository remotes with retryable network handling."""
@@ -814,6 +865,7 @@ class CommitCraftApp:
         try:
             self._show_branch_and_confirm("fetch_confirm")
             self.ui.info(self.ui.translator.text("fetching"))
+            self.logger.info("Fetching remote refs")
             result = self.git.fetch(
                 attempts=self.config.retry_attempts,
                 wait_seconds=self.config.retry_wait_seconds,
@@ -822,7 +874,9 @@ class CommitCraftApp:
             self._show_git_output(result.output)
             self.ui.success(self.ui.translator.text("fetch_done"))
         except GitError as exc:
+            self.logger.exception("Fetch failed")
             self.ui.error(self._friendly_error(exc))
+            self._show_git_error_details(exc)
 
     def _handle_pull(self) -> None:
         """Pull current branch using configured integration settings."""
@@ -843,6 +897,7 @@ class CommitCraftApp:
 
         try:
             self.ui.info(self.ui.translator.text("changelog_generating"))
+            self.logger.info("Generating changelog")
             result = ChangelogGenerator(self.git, __version__).update()
             if result.added_count == 0:
                 self.ui.warning(self.ui.translator.text("changelog_no_new_commits"))
@@ -853,6 +908,7 @@ class CommitCraftApp:
                 f"{self.ui.translator.text('changelog_entries')} | {result.path}"
             )
         except (OSError, GitError) as exc:
+            self.logger.exception("Changelog generation failed")
             self.ui.error(self._friendly_error(exc))
 
     def _handle_integration_operation(self, operation: str) -> None:
@@ -865,6 +921,7 @@ class CommitCraftApp:
             self._show_branch_and_confirm(f"{operation}_confirm")
             self.ui.info(self._strategy_summary())
             self.ui.info(self.ui.translator.text(f"{operation}ing"))
+            self.logger.info("Starting %s operation", operation)
             if operation == "pull":
                 result = self.git.pull(
                     self.config.pull_strategy,
@@ -882,11 +939,15 @@ class CommitCraftApp:
                     on_retry=self._show_git_retry,
                 )
             self._show_git_output(result.output)
+            self.logger.info("%s operation completed", operation)
             self.ui.success(self.ui.translator.text(f"{operation}_done"))
         except GitConflictError as exc:
+            self.logger.exception("%s operation reported conflict", operation)
             self._report_conflict(exc)
         except GitError as exc:
+            self.logger.exception("%s operation failed", operation)
             self.ui.error(self._friendly_error(exc))
+            self._show_git_error_details(exc)
 
     def _show_branch_and_confirm(self, confirm_key: str) -> None:
         """Show the current branch and stop the operation when user declines."""
@@ -913,6 +974,23 @@ class CommitCraftApp:
 
         if output.strip():
             self.ui.panel(self.ui.translator.text("git_output"), output.strip(), style="cyan")
+
+    def _show_git_error_details(self, exc: GitError) -> None:
+        """Show command, exit code, and captured Git output for actionable failures."""
+
+        details: list[str] = []
+        if exc.exit_code is not None:
+            details.append(f"{self.ui.translator.text('git_exit_code')}: {exc.exit_code}")
+        if exc.command:
+            details.append(f"{self.ui.translator.text('git_command')}: {' '.join(exc.command)}")
+        if exc.output.strip():
+            details.append(exc.output.strip())
+        if details:
+            self.ui.panel(
+                self.ui.translator.text("git_failure_details"),
+                "\n\n".join(details),
+                style="red",
+            )
 
     def _report_conflict(self, exc: GitConflictError) -> None:
         """Show conflict details and explicit recovery guidance."""
@@ -961,6 +1039,7 @@ class CommitCraftApp:
             "git_auth_failed",
             "git_no_commits",
             "git_no_upstream",
+            "git_non_fast_forward",
             "operation_cancelled",
             "ai_empty_message",
             "ai_empty_choices",
@@ -974,9 +1053,11 @@ class CommitCraftApp:
         if isinstance(exc, GitAuthError):
             return self.ui.translator.text("git_auth_failed")
         if isinstance(exc, GitRepositoryStateError):
-            return self.ui.translator.text(str(exc))
+            return self.ui.translator.text(exc.reason_key or str(exc))
         if isinstance(exc, GitError):
-            return self.ui.translator.text("git_command_failed")
+            if exc.reason_key:
+                return self.ui.translator.text(exc.reason_key)
+            return exc.output.strip() or self.ui.translator.text("git_command_failed")
         if isinstance(exc, AIClientError):
             return self.ui.translator.text("ai_request_failed")
         return message

@@ -5,7 +5,7 @@ uncommitted changes, lets you choose what to commit, asks the active configured
 AI provider for a commit message, and runs Git operations from a
 colorful terminal menu.
 
-Current version: **1.3.1**
+Current version: **1.4.0**
 
 ## English
 
@@ -27,6 +27,7 @@ Current version: **1.3.1**
 - Git fetch, pull, and sync retries for transient network failures.
 - Pull strategy setting for merge or rebase.
 - Optional auto-stash during pull and sync, including untracked files.
+- Daily UTF-8 log files with configurable `INFO`, `ERROR`, or `DEBUG` detail.
 - Incremental `CHANGELOG.md` generator based on Git commit history.
 - In-app settings editor with masked API token, validation, reset, and immediate apply.
 - Safe Git staging for deleted files by using `git rm --ignore-unmatch`.
@@ -131,6 +132,7 @@ of `git add` to avoid pathspec errors.
 ### Git Remote Workflows
 
 - `Push commits` shows the current branch, asks for confirmation, and runs `git push`.
+  If the branch has no upstream, CommitCraft runs `git push --set-upstream origin <branch>`.
 - `Fetch from remote` shows the current branch, asks for confirmation, and runs `git fetch --prune`.
 - `Pull from remote` runs `git pull --no-rebase` or `git pull --rebase` based on settings.
 - `Sync with remote` runs the configured pull operation first, then `git push`
@@ -149,9 +151,27 @@ Fetch, pull, and sync retry only retryable transport failures, such as DNS,
 timeout, connection reset, TLS/SSL, and HTTP 5xx failures. Authentication
 errors and merge/rebase/stash conflicts are reported without retrying.
 
+When Git fails, CommitCraft shows the classified cause when recognized, plus
+the exit code, command, and captured Git output. Push errors distinguish common
+cases such as missing upstream, authentication failure, and non-fast-forward
+rejection.
+
 When auto-stash is enabled and local changes exist, pull and sync create a
 `CommitCraft auto-stash` with `--include-untracked` and restore it after the
 integration operation if the repository is not left in a merge or rebase state.
+
+### Logging
+
+CommitCraft writes diagnostic logs separately from the terminal UI. Logs use
+UTF-8 and one file per day:
+
+```text
+~/.commitcraft/logs/commitcraft-YYYY-MM-DD.log
+```
+
+The default log level is `INFO`. Change `Log level` in settings to `INFO`,
+`ERROR`, or `DEBUG`; the choice is persisted in `~/.commitcraft/config.json`.
+`DEBUG` includes Git command details, exit codes, stdout, and stderr.
 
 ### Changelog Generator
 
@@ -206,7 +226,8 @@ Current default-backed config shape:
   "conventional_commits": true,
   "pull_strategy": "merge",
   "auto_stash": true,
-  "auto_split_commits": false
+  "auto_split_commits": false,
+  "log_level": "INFO"
 }
 ```
 
@@ -343,7 +364,7 @@ Commit with this message? [yes]: yes
 کنید، از یک API سازگار با GapGPT برای پیام کامیت کمک می‌گیرد و عملیات Git را
 از یک منوی ترمینالی رنگی اجرا می‌کند.
 
-نسخه فعلی: **1.3.1**
+نسخه فعلی: **1.4.0**
 
 ### امکانات
 
@@ -363,6 +384,7 @@ Commit with this message? [yes]: yes
 - تلاش مجدد برای fetch، pull و sync فقط در خطاهای موقت شبکه.
 - تنظیم روش pull بین merge و rebase.
 - auto-stash اختیاری هنگام pull و sync، همراه با فایل‌های untracked.
+- فایل‌های log روزانه با UTF-8 و سطح قابل تنظیم `INFO`، `ERROR` یا `DEBUG`.
 - تولید افزایشی `CHANGELOG.md` بر اساس تاریخچه commit.
 - ویرایش تنظیمات داخل برنامه با مخفی‌سازی توکن، اعتبارسنجی، بازنشانی و اعمال فوری.
 - stage کردن امن فایل‌های حذف‌شده با `git rm --ignore-unmatch`.
@@ -439,7 +461,8 @@ commitcraft
 
 ### عملیات Remote
 
-- push شاخه فعلی را پس از تأیید با `git push` ارسال می‌کند.
+- push شاخه فعلی را پس از تأیید با `git push` ارسال می‌کند. اگر شاخه بالادستی
+  نداشته باشد، CommitCraft دستور `git push --set-upstream origin <branch>` را اجرا می‌کند.
 - fetch پس از تأیید `git fetch --prune` را اجرا می‌کند.
 - pull بسته به تنظیمات با merge یا rebase اجرا می‌شود.
 - sync ابتدا pull تنظیم‌شده را اجرا می‌کند و پس از موفقیت، `git push` می‌زند.
@@ -451,6 +474,24 @@ commitcraft
 پیش از pull و sync بررسی می‌شود که مخزن حداقل یک commit داشته باشد و شاخه فعلی
 شاخه بالادستی داشته باشد. در مخزن تازه بدون commit یا بدون شاخه tracking،
 CommitCraft پیام روشن نمایش می‌دهد و بدون اجرای `git pull` به منو برمی‌گردد.
+
+اگر Git ناموفق شود، CommitCraft در صورت تشخیص علت، پیام روشن نمایش می‌دهد و
+کد خروج، فرمان اجراشده و خروجی ثبت‌شده Git را نشان می‌دهد. خطاهای push برای
+موارد رایج مثل نبود upstream، مشکل احراز هویت و رد شدن non-fast-forward
+جداگانه توضیح داده می‌شوند.
+
+### ثبت رویداد
+
+CommitCraft لاگ‌های عیب‌یابی را جدا از خروجی ترمینال می‌نویسد. فایل‌ها UTF-8
+هستند و برای هر روز یک فایل ساخته می‌شود:
+
+```text
+~/.commitcraft/logs/commitcraft-YYYY-MM-DD.log
+```
+
+سطح پیش‌فرض `INFO` است. در تنظیمات می‌توانید `Log level` را به `INFO`،
+`ERROR` یا `DEBUG` تغییر دهید؛ این مقدار در `~/.commitcraft/config.json`
+ذخیره می‌شود. سطح `DEBUG` جزئیات فرمان Git، کد خروج، stdout و stderr را ثبت می‌کند.
 
 ### تولید Changelog
 
@@ -505,14 +546,15 @@ CommitCraft پیام روشن نمایش می‌دهد و بدون اجرای `g
   "conventional_commits": true,
   "pull_strategy": "merge",
   "auto_stash": true,
-  "auto_split_commits": false
+  "auto_split_commits": false,
+  "log_level": "INFO"
 }
 ```
 
 تنظیمات قابل ویرایش شامل افزودن یا به‌روزرسانی ارائه‌دهنده‌های AI، تغییر
 ارائه‌دهنده فعال، نام مدل ارائه‌دهنده فعال، زبان نمایش، زبان پیام کامیت، زمان
 انتظار تلاش مجدد، تعداد تلاش مجدد، حالت Conventional Commits، تقسیم خودکار
-کامیت‌ها، روش pull، auto-stash و پوشه کاری است. توکن در جدول تنظیمات مخفی
+کامیت‌ها، روش pull، auto-stash، سطح log و پوشه کاری است. توکن در جدول تنظیمات مخفی
 نمایش داده می‌شود.
 
 تنظیمات قدیمی با `api_token`، `api_url` و `model` به‌صورت خودکار به پروفایل

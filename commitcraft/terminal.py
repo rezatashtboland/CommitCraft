@@ -195,8 +195,8 @@ class TerminalUI:
         table.add_column(self.t("settings_value_column"), style="white")
         for key, label, value in rows:
             table.add_row(key, self.display(label), self.display(value))
-        table.add_row("12", self.t("settings_reset"), "")
-        table.add_row("13", self.t("settings_cancel"), "")
+        table.add_row("13", self.t("settings_reset"), "")
+        table.add_row("14", self.t("settings_cancel"), "")
         table.add_row("0", self.t("settings_back"), "")
         self.console.print(Panel(table, border_style="green"))
         return Prompt.ask(
