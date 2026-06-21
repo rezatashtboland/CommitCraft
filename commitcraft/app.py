@@ -13,6 +13,7 @@ from .changelog import ChangelogGenerator
 from .config import (
     AIProviderConfig,
     DEFAULT_CONVENTIONAL_COMMITS,
+    DEFAULT_PULL_STRATEGY,
     DEFAULT_PROVIDER_NAME,
     DEFAULT_RETRY_ATTEMPTS,
     DEFAULT_RETRY_WAIT_SECONDS,
@@ -33,7 +34,14 @@ from .config import (
 )
 from .conventional import normalize_commit_message
 from .dependencies import Dependency, DependencyInstaller, PERSIAN_DEPENDENCIES
-from .git_service import ChangedFile, GitAuthError, GitConflictError, GitError, GitService
+from .git_service import (
+    ChangedFile,
+    GitAuthError,
+    GitConflictError,
+    GitError,
+    GitRepositoryStateError,
+    GitService,
+)
 from .i18n import DEFAULT_LANGUAGE, Translator
 from .repository_state import (
     GitRepositoryError,
@@ -248,11 +256,7 @@ class CommitCraftApp:
             validate_bool,
             default=self.ui.translator.text("yes" if DEFAULT_CONVENTIONAL_COMMITS else "no"),
         )
-        pull_strategy = self._ask_validated(
-            self._prompt_with_hint("pull_strategy", "pull_strategy_hint"),
-            validate_pull_strategy,
-            default=self.ui.translator.text("pull_strategy_merge"),
-        )
+        pull_strategy = self._choose_pull_strategy(default=DEFAULT_PULL_STRATEGY)
         auto_stash = self._ask_validated(
             self._prompt_with_hint("auto_stash", "bool_options_hint"),
             validate_bool,
@@ -307,6 +311,26 @@ class CommitCraftApp:
         """Build a localized prompt with a localized hint."""
 
         return f"{self.ui.translator.text(label_key)} ({self.ui.translator.text(hint_key)})"
+
+    def _choose_pull_strategy(self, default: str) -> str:
+        """Ask for a pull strategy from a localized numbered list."""
+
+        rows = [
+            ("1", self.ui.translator.text("pull_strategy_merge")),
+            ("2", self.ui.translator.text("pull_strategy_rebase")),
+        ]
+        default_choice = "2" if default == "rebase" else "1"
+        while True:
+            raw_value = self.ui.choose_from_rows(
+                self.ui.translator.text("pull_strategy_options"),
+                rows,
+                self._prompt_with_hint("pull_strategy_choice", "pull_strategy_hint"),
+                default=default_choice,
+            )
+            try:
+                return validate_pull_strategy(raw_value)
+            except ValueError as exc:
+                self.ui.error(self.ui.translator.text(str(exc)))
 
     def _apply_config_language(self) -> None:
         """Apply configured UI language."""
@@ -564,6 +588,11 @@ class CommitCraftApp:
             f"{self._localized_option_hint(option)} "
             f"({self.ui.translator.text('settings_cancel_hint')})"
         )
+        if option.field_name == "pull_strategy":
+            new_value = self._choose_pull_strategy(default=str(current_value))
+            self._save_config(replace(self.config, pull_strategy=new_value))
+            self.ui.success(self.ui.translator.text("settings_update_done"))
+            return
         while True:
             raw_value = self.ui.ask(prompt, default=default, password=option.password)
             if raw_value.strip() == "0":
@@ -832,6 +861,7 @@ class CommitCraftApp:
         if self.config is None:
             return
         try:
+            self.git.ensure_pull_ready()
             self._show_branch_and_confirm(f"{operation}_confirm")
             self.ui.info(self._strategy_summary())
             self.ui.info(self.ui.translator.text(f"{operation}ing"))
@@ -929,6 +959,8 @@ class CommitCraftApp:
             "git_conflict",
             "git_stash_conflict",
             "git_auth_failed",
+            "git_no_commits",
+            "git_no_upstream",
             "operation_cancelled",
             "ai_empty_message",
             "ai_empty_choices",
@@ -941,6 +973,8 @@ class CommitCraftApp:
             return self.ui.translator.text("git_conflict")
         if isinstance(exc, GitAuthError):
             return self.ui.translator.text("git_auth_failed")
+        if isinstance(exc, GitRepositoryStateError):
+            return self.ui.translator.text(str(exc))
         if isinstance(exc, GitError):
             return self.ui.translator.text("git_command_failed")
         if isinstance(exc, AIClientError):

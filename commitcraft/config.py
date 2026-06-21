@@ -312,6 +312,17 @@ def validate_pull_strategy(value: str) -> str:
     """Validate and normalize the Git pull integration strategy."""
 
     normalized = value.strip().lower()
+    aliases = {
+        "1": "merge",
+        "m": "merge",
+        "merge": "merge",
+        "ادغام": "merge",
+        "2": "rebase",
+        "r": "rebase",
+        "rebase": "rebase",
+        "بازچینی": "rebase",
+    }
+    normalized = aliases.get(normalized, normalized)
     if normalized in PULL_STRATEGIES:
         return normalized
     raise ValueError("invalid_pull_strategy")

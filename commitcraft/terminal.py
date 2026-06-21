@@ -169,6 +169,19 @@ class TerminalUI:
             table.add_row(self.display(key), self.display(value))
         self.console.print(table)
 
+    def choose_from_rows(
+        self,
+        title: str,
+        rows: Iterable[tuple[str, str]],
+        prompt: str,
+        *,
+        default: str | None = None,
+    ) -> str:
+        """Render numbered choices and return the selected raw input."""
+
+        self.table(title, rows)
+        return Prompt.ask(self.display(prompt), default=default)
+
     def settings_menu(self, rows: Iterable[tuple[str, str, str]]) -> str:
         """Render the persistent settings submenu and return selected option."""
 

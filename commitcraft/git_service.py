@@ -27,6 +27,10 @@ class GitTransientError(GitError):
     """Raised when Git reports a retryable transport failure."""
 
 
+class GitRepositoryStateError(GitError):
+    """Raised when repository history or tracking state blocks an operation."""
+
+
 @dataclass(frozen=True)
 class ChangedFile:
     """A changed file reported by Git porcelain status."""
@@ -223,6 +227,29 @@ class GitService:
 
         result = self._run(["git", "branch", "--show-current"], check=True)
         return result.stdout.strip() or "HEAD"
+
+    def has_commits(self) -> bool:
+        """Return whether the repository has at least one commit."""
+
+        result = self._run(["git", "rev-parse", "--verify", "HEAD"], check=False)
+        return result.returncode == 0
+
+    def has_upstream(self) -> bool:
+        """Return whether the current branch has a configured upstream."""
+
+        result = self._run(
+            ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+            check=False,
+        )
+        return result.returncode == 0 and bool(result.stdout.strip())
+
+    def ensure_pull_ready(self) -> None:
+        """Raise a localized-key error when pull or sync cannot run safely."""
+
+        if not self.has_commits():
+            raise GitRepositoryStateError("git_no_commits")
+        if not self.has_upstream():
+            raise GitRepositoryStateError("git_no_upstream")
 
     def commits_after(self, full_hash: str | None) -> list[GitCommit]:
         """Return commits after the provided hash in oldest-to-newest order."""

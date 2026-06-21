@@ -5,7 +5,7 @@ uncommitted changes, lets you choose what to commit, asks the active configured
 AI provider for a commit message, and runs Git operations from a
 colorful terminal menu.
 
-Current version: **1.3.0**
+Current version: **1.3.1**
 
 ## English
 
@@ -135,6 +135,15 @@ of `git add` to avoid pathspec errors.
 - `Pull from remote` runs `git pull --no-rebase` or `git pull --rebase` based on settings.
 - `Sync with remote` runs the configured pull operation first, then `git push`
   after a successful pull.
+
+The pull strategy setting defaults to merge. First-run setup and the settings
+menu show a numbered list: choose `1` for merge or `2` for rebase. Press Enter
+to keep the default or current strategy.
+
+Pull and sync first verify that the repository has at least one commit and that
+the current branch has an upstream. In a fresh repository with no commits or no
+tracking branch, CommitCraft shows a clear message and returns to the menu
+without running `git pull`.
 
 Fetch, pull, and sync retry only retryable transport failures, such as DNS,
 timeout, connection reset, TLS/SSL, and HTTP 5xx failures. Authentication
@@ -334,7 +343,7 @@ Commit with this message? [yes]: yes
 کنید، از یک API سازگار با GapGPT برای پیام کامیت کمک می‌گیرد و عملیات Git را
 از یک منوی ترمینالی رنگی اجرا می‌کند.
 
-نسخه فعلی: **1.3.0**
+نسخه فعلی: **1.3.1**
 
 ### امکانات
 
@@ -434,6 +443,14 @@ commitcraft
 - fetch پس از تأیید `git fetch --prune` را اجرا می‌کند.
 - pull بسته به تنظیمات با merge یا rebase اجرا می‌شود.
 - sync ابتدا pull تنظیم‌شده را اجرا می‌کند و پس از موفقیت، `git push` می‌زند.
+
+روش pull به‌صورت پیش‌فرض merge است. هنگام راه‌اندازی اولیه و در منوی تنظیمات،
+فهرست شماره‌دار نمایش داده می‌شود: برای merge عدد `1` و برای rebase عدد `2`
+را انتخاب کنید. با زدن Enter مقدار پیش‌فرض یا مقدار فعلی حفظ می‌شود.
+
+پیش از pull و sync بررسی می‌شود که مخزن حداقل یک commit داشته باشد و شاخه فعلی
+شاخه بالادستی داشته باشد. در مخزن تازه بدون commit یا بدون شاخه tracking،
+CommitCraft پیام روشن نمایش می‌دهد و بدون اجرای `git pull` به منو برمی‌گردد.
 
 ### تولید Changelog
 
