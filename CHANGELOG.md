@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+
+## [1.3.1] - 2026-06-21
+### Added
+- Add interactive pull strategy selection and readiness checks (`c7679af`) <!-- commitcraft:entry=c7679af39d2b17c114dfea091e5bf12eedef11b7 -->
+
+### Documentation
+- به‌روزرسانی CHANGELOG برای نسخه 1.3.0 (`ab4a14f`) <!-- commitcraft:entry=ab4a14fb152f5e24b86f754d0b21e417ee35334a -->
+
 ## [1.3.0] - 2026-06-17
 ### Added
 - اضافه کردن پشتیبانی از چند ارائه‌دهنده AI و تقسیم خودکار کامیت‌ها (`06d8b5e`) <!-- commitcraft:entry=06d8b5e7d9189849c193cd87a8d0e4c4210c2086 -->
@@ -32,4 +40,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - افزودن AGENTS.md با دستورالعمل‌های هوش مصنوعی (`76c9ebd`) <!-- commitcraft:entry=76c9ebd47c038d90aebbe818e30f96549ca735d1 -->
 - به‌روزرسانی مستندات README و AGENTS (`c54e6d0`) <!-- commitcraft:entry=c54e6d0b29fe052419e4aef7f837e027714939c6 -->
 
-<!-- commitcraft:last-commit=06d8b5e7d9189849c193cd87a8d0e4c4210c2086 -->
+<!-- commitcraft:last-commit=c7679af39d2b17c114dfea091e5bf12eedef11b7 -->
